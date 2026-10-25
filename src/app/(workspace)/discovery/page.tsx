@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Compass,
@@ -30,8 +30,14 @@ import {
   EmptyState,
 } from "@/components/shared";
 import { formatDate } from "@/lib/utils";
+import {
+  discoveryResultLimit,
+  validateDiscoveryForm,
+  discoveryBlockReason,
+} from "@/lib/discovery-form";
 export default function Discovery() {
-  const { data, action, notify, refresh } = useWorkspace();
+  const { data, loading, connectionError, action, notify, refresh } =
+    useWorkspace();
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
     country: "Pakistan",
@@ -39,21 +45,73 @@ export default function Discovery() {
     category: "cafe",
     keywords: "",
     service_area: "",
-    max_results: 25,
+    max_results: "25",
     requirements: { public_contact: false, website_review: true },
   });
   const [expanded, setExpanded] = useState<string | null>(null);
-  const set = (key: string, value: unknown) =>
+  const [attempted, setAttempted] = useState(false);
+  const [limitEdited, setLimitEdited] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const limit = discoveryResultLimit(data.settings?.search_limit);
+  useEffect(() => {
+    if (!limitEdited)
+      setForm((f) => ({ ...f, max_results: String(Math.min(25, limit)) }));
+  }, [limit, limitEdited]);
+  const validation = validateDiscoveryForm(
+    {
+      ...form,
+      max_results:
+        form.max_results.trim() === "" ? NaN : Number(form.max_results),
+    },
+    limit,
+  );
+  const errors = attempted ? validation.errors : {};
+  const set = (key: string, value: unknown) => {
     setForm((f) => ({ ...f, [key]: value }));
-  async function submit(e: React.FormEvent) {
+    setSubmissionError(null);
+    setSuccess(null);
+  };
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (busy) return;
+    setAttempted(true);
+    setSuccess(null);
+    setSubmissionError(null);
+    if (!validation.success) {
+      const formElement = e.currentTarget;
+      // Wait for aria-invalid/descriptions to commit, then focus in visual DOM
+      // order (not schema order), so assistive technology reads the new error.
+      requestAnimationFrame(() => {
+        if (!formElement.isConnected) return;
+        const field = Array.from(formElement.elements).find(
+          (control) =>
+            (control instanceof HTMLInputElement ||
+              control instanceof HTMLSelectElement) &&
+            Boolean(validation.errors[control.name]),
+        );
+        if (field instanceof HTMLElement) field.focus();
+      });
+      return;
+    }
+    const blocked = discoveryBlockReason(data, loading, connectionError);
+    if (blocked) {
+      setSubmissionError(blocked);
+      notify(blocked, true);
+      return;
+    }
     setBusy(true);
     try {
-      await action("create_job", form);
-      notify(
-        "Discovery queued. The worker will query OpenStreetMap and record its progress.",
+      await action("create_job", validation.data);
+      setSuccess(
+        "Discovery queued. Queued is not a completed search—follow the job logs for source results, progress and provider errors.",
       );
-    } catch {
+    } catch (error) {
+      setSubmissionError(
+        error instanceof Error
+          ? error.message
+          : "Unable to queue discovery. Check the connection and try again.",
+      );
     } finally {
       setBusy(false);
     }
@@ -102,24 +160,49 @@ export default function Discovery() {
           description="Define the businesses you’d like to discover."
           className="discovery-form-panel"
         >
-          <form onSubmit={submit} className="form-stack">
+          <form
+            onSubmit={submit}
+            className="form-stack"
+            noValidate
+            aria-busy={busy}
+          >
+            {attempted && !validation.success && (
+              <div className="form-feedback form-feedback-error" role="alert">
+                Please check the highlighted fields before starting discovery.
+              </div>
+            )}
+            {submissionError && (
+              <div className="form-feedback form-feedback-error" role="alert">
+                {submissionError}
+              </div>
+            )}
+            {success && (
+              <div
+                className="form-feedback form-feedback-success"
+                role="status"
+              >
+                {success}
+              </div>
+            )}
             <div className="form-section-title">
               <MapPin size={17} />
               Where are we looking?<span>01</span>
             </div>
             <div className="form-grid">
-              <Field label="Country">
+              <Field label="Country" error={errors.country}>
                 <input
                   required
+                  name="country"
                   value={form.country}
                   maxLength={80}
                   onChange={(e) => set("country", e.target.value)}
                   placeholder="e.g. Pakistan"
                 />
               </Field>
-              <Field label="City">
+              <Field label="City" error={errors.city}>
                 <input
                   required
+                  name="city"
                   value={form.city}
                   maxLength={100}
                   onChange={(e) => set("city", e.target.value)}
@@ -130,8 +213,10 @@ export default function Discovery() {
             <Field
               label="Service area (optional)"
               hint="Context for your research. The source query uses city boundaries."
+              error={errors.service_area}
             >
               <input
+                name="service_area"
                 value={form.service_area}
                 onChange={(e) => set("service_area", e.target.value)}
                 placeholder="e.g. Clifton, DHA, and surrounding areas"
@@ -143,8 +228,9 @@ export default function Discovery() {
               Which businesses fit your focus?<span>02</span>
             </div>
             <div className="form-grid">
-              <Field label="Business category">
+              <Field label="Business category" error={errors.category}>
                 <select
+                  name="category"
                   value={form.category}
                   onChange={(e) => set("category", e.target.value)}
                 >
@@ -166,23 +252,31 @@ export default function Discovery() {
               </Field>
               <Field
                 label="Maximum results"
-                hint="Up to 100 public listings per job."
+                hint={`Up to ${limit} public listings per job (workspace limit).`}
+                error={errors.max_results}
               >
                 <input
                   type="number"
                   min={1}
-                  max={data.settings?.search_limit || 100}
+                  max={limit}
+                  step={1}
                   required
+                  name="max_results"
                   value={form.max_results}
-                  onChange={(e) => set("max_results", Number(e.target.value))}
+                  onChange={(e) => {
+                    setLimitEdited(true);
+                    set("max_results", e.target.value);
+                  }}
                 />
               </Field>
             </div>
             <Field
               label="Keywords (optional)"
               hint="Filters business names returned by the source."
+              error={errors.keywords}
             >
               <input
+                name="keywords"
                 value={form.keywords}
                 maxLength={120}
                 onChange={(e) => set("keywords", e.target.value)}
@@ -204,13 +298,27 @@ export default function Discovery() {
                   Community-maintained public business listings · ODbL
                 </small>
               </span>
-              <Badge tone={data.config.discovery ? "green" : "amber"}>
-                {data.config.discovery ? "Available" : "Setup needed"}
+              <Badge
+                tone={
+                  !data.config.discovery ||
+                  data.config.worker?.enabled === false
+                    ? "amber"
+                    : "blue"
+                }
+              >
+                {!data.config.discovery
+                  ? "Setup needed"
+                  : data.config.worker?.enabled === false
+                    ? "Worker paused"
+                    : "Source configured"}
               </Badge>
             </label>
             <p className="field-help">
               A public listing is a starting point, not proof of current
               activity. Source attribution and timestamps are retained.
+              {data.config.discovery &&
+                !data.config.worker &&
+                " Worker status is unconfirmed; configuring a source alone does not prove a worker is running."}
             </p>
             <div className="form-section-title">
               <ShieldCheck size={17} />
@@ -265,7 +373,8 @@ export default function Discovery() {
                 No scraping. No invented leads.
               </span>
               <Button type="submit" disabled={busy}>
-                {busy ? <Spinner /> : <Compass size={16} />}Start discovery
+                {busy ? <Spinner /> : <Compass size={16} />}
+                {busy ? "Queuing discovery…" : "Start discovery"}
                 <ArrowRight size={16} />
               </Button>
             </div>

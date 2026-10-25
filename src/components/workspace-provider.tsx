@@ -11,12 +11,14 @@ import { CheckCircle2, AlertCircle, X } from "lucide-react";
 const Context = createContext<{
   data: Workspace;
   loading: boolean;
+  connectionError: string | null;
   refresh: () => Promise<void>;
   action: (type: string, payload: Record<string, unknown>) => Promise<unknown>;
   notify: (message: string, error?: boolean) => void;
 }>({
   data: emptyWorkspace,
   loading: true,
+  connectionError: null,
   refresh: async () => {},
   action: async () => {},
   notify: () => {},
@@ -24,6 +26,7 @@ const Context = createContext<{
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState(emptyWorkspace);
   const [loading, setLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     message: string;
     error: boolean;
@@ -35,10 +38,20 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await fetch("/api/workspace");
       const result = await res.json();
+      if (!res.ok || result.error)
+        throw new Error(
+          result.error ||
+            "Unable to load your workspace. Check configuration and retry.",
+        );
       setData(result);
-      if (result.error) notify(result.error, true);
-    } catch {
-      notify("Unable to connect. Check your connection and try again.", true);
+      setConnectionError(null);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to connect. Check your connection and try again.";
+      setConnectionError(message);
+      notify(message, true);
     } finally {
       setLoading(false);
     }
@@ -81,7 +94,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
   }
   return (
-    <Context.Provider value={{ data, loading, refresh, action, notify }}>
+    <Context.Provider
+      value={{ data, loading, connectionError, refresh, action, notify }}
+    >
       {children}
       {toast && (
         <div
