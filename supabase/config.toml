@@ -1,0 +1,7 @@
+project_id = "prospectai-studio"
+
+[functions.prospectai-worker]
+# The function enforces its own private x-worker-token using WebCrypto HMAC.
+# Do not deploy an unguarded handler with this setting.
+verify_jwt = false
+entrypoint = "./functions/prospectai-worker/bundle.js"

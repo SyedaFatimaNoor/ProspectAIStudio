@@ -538,3 +538,26 @@ test("cloud verification never presents a listing review as a live website check
     page.getByText(/A completed run does not mean verified activity/),
   ).toBeVisible();
 });
+
+test("paused cloud worker explains that queued jobs cannot run", async ({
+  page,
+}) => {
+  await mocked(page, {
+    config: {
+      database: true,
+      discovery: true,
+      ai: false,
+      worker: {
+        enabled: false,
+        mode: "listing-only",
+        daily_limit: 20,
+        daily_attempts: 1,
+        interval_minutes: 5,
+        last_started_at: null,
+        last_finished_at: null,
+      },
+    },
+  });
+  await page.goto("/discovery");
+  await expect(page.getByText(/Cloud discovery is paused/)).toBeVisible();
+});

@@ -76,6 +76,13 @@ export default function Discovery() {
           Refresh jobs
         </Button>
       </PageHeading>
+      {data.config.worker && !data.config.worker.enabled && (
+        <Notice tone="error">
+          Cloud discovery is paused. Queued jobs will not run until the operator
+          resolves the provider/setup issue and re-enables the scheduler. Check
+          failed job logs; no source results are fabricated.
+        </Notice>
+      )}
       {data.config.worker?.enabled && (
         <Notice>
           Cloud discovery is enabled: one job attempt every{" "}

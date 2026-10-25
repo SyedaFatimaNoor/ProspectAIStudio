@@ -34,11 +34,11 @@ function request(tokenValue: string | null = secret, body = "{}") {
   });
 }
 
-test("cloud worker uses constant-time comparison and rejects missing, short and wrong tokens", () => {
-  assert.equal(validWorkerToken(secret, secret), true);
+test("cloud worker uses constant-time comparison and rejects missing, short and wrong tokens", async () => {
+  assert.equal(await validWorkerToken(secret, secret), true);
   for (const value of [null, "", "wrong", secret + "x", "x".repeat(1000)])
-    assert.equal(validWorkerToken(secret, value), false);
-  assert.equal(validWorkerToken("short", "short"), false);
+    assert.equal(await validWorkerToken(secret, value), false);
+  assert.equal(await validWorkerToken("short", "short"), false);
 });
 
 test("cloud worker rejects unauthorized callers before any database/provider access", async () => {
@@ -178,4 +178,89 @@ test("commit failure does not report success", async () => {
     "pa_cloud_commit",
     "pa_cloud_fail",
   ]);
+});
+
+test("portable cloud input parser matches supported Zod job limits and rejects category prototypes", async () => {
+  const { parseCloudSearch, parseProviderPayload } =
+    await import("../src/lib/discovery-core");
+  const { jobSchema } = await import("../src/lib/validation");
+  assert.deepEqual(parseCloudSearch(job), jobSchema.parse(job));
+  for (const patch of [
+    { category: "__proto__" },
+    { max_results: 101 },
+    { city: "" },
+    { country: 42 },
+    { requirements: {} },
+  ])
+    assert.throws(() => parseCloudSearch({ ...job, ...patch }));
+  for (const value of [
+    null,
+    {},
+    { elements: new Array(1001).fill({}) },
+    { elements: [{ id: -1, type: "node" }] },
+    { elements: [{ id: 1, type: "node", tags: { name: 12 } }] },
+  ])
+    assert.throws(() => parseProviderPayload(value));
+});
+
+test("shared portable provider preserves provenance and the Node fingerprint without actual network access", async () => {
+  const { discoverOpenStreetMap } = await import("../src/lib/discovery-core");
+  const { fingerprint } = await import("../src/lib/discovery");
+  const { jobSchema } = await import("../src/lib/validation");
+  const previous = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async (url, init) => {
+    requests++;
+    assert.equal(String(url), "https://example.invalid/overpass");
+    assert.equal(init?.method, "POST");
+    return Response.json({
+      elements: [
+        {
+          id: 123,
+          type: "node",
+          lat: 24.86,
+          lon: 67.01,
+          tags: {
+            name: "TEST ONLY Dental",
+            phone: "+923000000000",
+            website: "example.invalid",
+          },
+        },
+      ],
+    });
+  };
+  try {
+    const rows = await discoverOpenStreetMap(
+      jobSchema.parse(job),
+      "https://example.invalid/overpass",
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(
+      rows[0].fingerprint,
+      fingerprint("TEST ONLY Dental", "Karachi|Pakistan|24.860,67.010"),
+    );
+    assert.equal(rows[0].source_url, "https://www.openstreetmap.org/node/123");
+    assert.match(String(rows[0].facts.attribution), /OpenStreetMap/);
+    assert.equal(requests, 1); // In particular, the business website was NOT requested.
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
+test("failure logging connection errors still return a controlled failure and leave lease recovery possible", async () => {
+  const handler = createWorkerHandler({
+    env,
+    database: () => ({
+      rpc: async (name) => {
+        if (name === "pa_cloud_fail") throw new Error("Connection unavailable");
+        return { data: { job, token }, error: null };
+      },
+    }),
+    provider: {
+      discover: async () => {
+        throw new Error("Provider unavailable");
+      },
+    },
+  });
+  assert.equal((await handler(request())).status, 502);
 });

@@ -25,7 +25,7 @@ Use Supabase locally (free/open-source) or a hosted project:
 3. Enable email/password authentication. Configure Site URL to your app's actual origin and add `https://your-origin/auth/callback` to allowed redirect URLs. For local development, allow `http://localhost:3000/auth/callback`. Never allow arbitrary production redirect origins.
 4. Create an account at `/sign-in`. If email confirmation is enabled, confirm the email before signing in. Supabase's own email limits apply; production SMTP is optional configuration outside this app.
 
-**Existing connected project:** the three original migrations and the cloud-worker migration were applied to `prospectai-studio` during this build. Existing application tables were preserved. Do **not** reapply these non-idempotent migrations to that project. The project URL and browser-safe publishable key are configured in `src/lib/supabase-config.ts`, with optional `.env.local` overrides. Keeping public defaults in source preserves the connection across preview restarts. No service-role or secret key is stored in source. The current preview callback URL is registered with Supabase; register the exact callback origin again if a future sandbox has a new hostname.
+**Existing connected project:** the three original migrations and two cloud-worker migrations were applied to `prospectai-studio` during this build. Existing application tables were preserved. Do **not** reapply these non-idempotent migrations to that project. The project URL and browser-safe publishable key are configured in `src/lib/supabase-config.ts`, with optional `.env.local` overrides. Keeping public defaults in source preserves the connection across preview restarts. No service-role or secret key is stored in source. The current preview callback URL is registered with Supabase; register the exact callback origin again if a future sandbox has a new hostname.
 
 ### Why `pa_` tables?
 
@@ -41,7 +41,7 @@ Every table has RLS. Ownership is checked against `auth.uid()`, with composite `
 
 The existing project supports a private **Supabase Edge Function + Cron** worker, without a new paid service. It checks due jobs every five minutes, limits discovery to 20 attempts per UTC day, commits results atomically, and skips idle Edge invocations. Cloud evidence review is explicitly **listing-only**, not live website checks. Vercel still hosts the website; deploying Next.js alone does not start background processing.
 
-See [cloud setup, private token handling, quotas, health and pause controls](docs/CLOUD_WORKER.md). Free quotas still apply; no indefinite-free guarantee is made. Do not run the persistent Node worker at the same time as cloud mode.
+**Current cloud state:** installed but paused after the public provider rejected a real request with HTTP 406. No discovery results were fabricated. See [cloud setup, private token handling, quotas, health, provider blocker and pause controls](docs/CLOUD_WORKER.md). Free quotas still apply; no indefinite-free guarantee is made. Do not run the persistent Node worker at the same time as cloud mode.
 
 ### Persistent Node worker (alternative)
 
