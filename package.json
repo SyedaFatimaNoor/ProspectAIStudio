@@ -1,0 +1,52 @@
+{
+  "name": "prospectai",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/unit.test.ts",
+    "test:e2e": "playwright test",
+    "worker": "tsx scripts/worker.ts",
+    "format": "prettier --write src scripts tests *.ts *.json *.mjs *.md docs/*.md --ignore-unknown"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "next": "^15.5.9",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwind-merge": "^3.3.1",
+    "tsx": "^4.23.15",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.55.1",
+    "@sparticuz/chromium": "^153.0.0",
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/node": "^22.18.6",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.1.13",
+    "topojson-client": "^3.1.0",
+    "typescript": "^5.9.2",
+    "world-atlas": "^2.0.2"
+  },
+  "overrides": {
+    "postcss": "^8.5.31"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.17"
+  }
+}
