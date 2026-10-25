@@ -76,6 +76,19 @@ export default function Discovery() {
           Refresh jobs
         </Button>
       </PageHeading>
+      {data.config.worker?.enabled && (
+        <Notice>
+          Cloud discovery is enabled: one job attempt every{" "}
+          {data.config.worker.interval_minutes} minutes when work is due. Today:{" "}
+          {data.config.worker.daily_attempts}/{data.config.worker.daily_limit}{" "}
+          attempts (UTC).
+          {data.config.worker.daily_attempts >= data.config.worker.daily_limit
+            ? " Daily cap reached; queued jobs wait until the next UTC day."
+            : " Queued jobs do not need a laptop worker."}{" "}
+          Cloud evidence review is listing-only; activity and website
+          ownership/absence require manual review.
+        </Notice>
+      )}
       <div className="discovery-layout">
         <Panel
           title="A little direction goes a long way"

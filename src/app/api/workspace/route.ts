@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/supabase";
 import { supabaseConfigured } from "@/lib/supabase-config";
-import { emptyWorkspace } from "@/lib/types";
+import { emptyWorkspace, type Workspace } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export async function GET() {
-  const config = {
+  const config: Workspace["config"] = {
     database: supabaseConfigured,
     discovery: Boolean(process.env.OVERPASS_URL),
     ai: Boolean(process.env.AI_BASE_URL && process.env.AI_MODEL),
@@ -21,6 +21,12 @@ export async function GET() {
         "Authentication connection failed. Check Supabase configuration and try again.",
       );
     if (!user) return NextResponse.json({ ...emptyWorkspace, config });
+    // Backwards-compatible when this optional migration has not been installed.
+    // This function exposes only operational metadata, never tokens or job owners.
+    const { data: worker, error: workerError } = await db.rpc(
+      "pa_cloud_worker_status",
+    );
+    if (!workerError && worker) config.worker = worker;
     const tables = {
       businesses: "businesses",
       jobs: "discovery_jobs",

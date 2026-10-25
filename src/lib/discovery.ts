@@ -123,8 +123,9 @@ export function overpassQuery(input: SearchInput) {
 }
 export class OpenStreetMapProvider implements BusinessProvider {
   id = "openstreetmap";
+  constructor(private readonly endpoint?: string) {}
   async discover(input: SearchInput, signal?: AbortSignal) {
-    const endpoint = process.env.OVERPASS_URL;
+    const endpoint = this.endpoint ?? process.env.OVERPASS_URL;
     if (!endpoint)
       throw new Error(
         "No Overpass endpoint configured. No source was queried.",

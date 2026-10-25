@@ -63,6 +63,14 @@ export default function Verification() {
           Refresh evidence
         </Button>
       </PageHeading>
+      {data.config.worker?.enabled && (
+        <Notice>
+          Cloud mode performs listing-only evidence reviews. It does not fetch
+          business websites or independently search for domains. A completed run
+          does not mean verified activity or proven website absence. Record
+          independently reviewed evidence before qualifying a lead.
+        </Notice>
+      )}
       <div className="verification-principle">
         <div className="principle-icon">
           <ShieldCheck size={27} />
