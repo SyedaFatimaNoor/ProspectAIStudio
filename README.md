@@ -25,7 +25,7 @@ Use Supabase locally (free/open-source) or a hosted project:
 3. Enable email/password authentication. Configure Site URL to your app's actual origin and add `https://your-origin/auth/callback` to allowed redirect URLs. For local development, allow `http://localhost:3000/auth/callback`. Never allow arbitrary production redirect origins.
 4. Create an account at `/sign-in`. If email confirmation is enabled, confirm the email before signing in. Supabase's own email limits apply; production SMTP is optional configuration outside this app.
 
-**Existing connected project:** the three migrations were applied to `prospectai-studio` during this build. Existing application tables were preserved. Do **not** reapply these non-idempotent migrations to that project. The project URL and browser-safe publishable key are configured in `src/lib/supabase-config.ts`, with optional `.env.local` overrides. Keeping public defaults in source preserves the connection across preview restarts. No service-role or secret key is stored in source. The current preview callback URL is registered with Supabase; register the exact callback origin again if a future sandbox has a new hostname.
+**Existing connected project:** the three original migrations and two cloud-worker migrations were applied to `prospectai-studio` during this build. Existing application tables were preserved. Do **not** reapply these non-idempotent migrations to that project. The project URL and browser-safe publishable key are configured in `src/lib/supabase-config.ts`, with optional `.env.local` overrides. Keeping public defaults in source preserves the connection across preview restarts. No service-role or secret key is stored in source. The current preview callback URL is registered with Supabase; register the exact callback origin again if a future sandbox has a new hostname.
 
 ### Why `pa_` tables?
 
@@ -36,6 +36,14 @@ The connected project already had unrelated tables. ProspectAI uses isolated `pa
 Every table has RLS. Ownership is checked against `auth.uid()`, with composite `(record_id, user_id)` foreign keys preventing cross-tenant associations. Audit access is read/append only. Business deletion cascades to related research/proposals/drafts; suppression records remain to honour opt-outs. No private storage bucket or service-role credential is exposed to clients.
 
 ## Live discovery and background processing
+
+### Laptop-free cloud option
+
+The existing project supports a private **Supabase Edge Function + Cron** worker, without a new paid service. It checks due jobs every five minutes, limits discovery to 20 attempts per UTC day, commits results atomically, and skips idle Edge invocations. Cloud evidence review is explicitly **listing-only**, not live website checks. Vercel still hosts the website; deploying Next.js alone does not start background processing.
+
+**Current cloud state:** installed but paused after the public provider rejected a real request with HTTP 406. No discovery results were fabricated. See [cloud setup, private token handling, quotas, health, provider blocker and pause controls](docs/CLOUD_WORKER.md). Free quotas still apply; no indefinite-free guarantee is made. Do not run the persistent Node worker at the same time as cloud mode.
+
+### Persistent Node worker (alternative)
 
 ```dotenv
 # Configure only after reviewing the endpoint's usage policy.
@@ -53,7 +61,7 @@ The worker is a persistent process, **not a serverless route**. It polls Postgre
 
 No source is enabled by default. Without `OVERPASS_URL`, creating a discovery returns an actionable error and no fake completion. Without a worker, jobs remain queued with a clear waiting log. Website-only verification can run without Overpass once a real lead exists.
 
-**Network in this build environment:** outbound access is restricted. Live Overpass discovery, application-to-Supabase authenticated sessions, and a real AI model could not be exercised end-to-end here. Database migrations and transactional RLS/security checks were executed through the connected Supabase tool. No real businesses were invented or imported to work around the restriction.
+**Network in this build environment:** local outbound access is restricted. Application-to-Supabase authenticated sessions and a real AI model could not be exercised end-to-end locally. Cloud source execution is checked separately through the deployed Edge Function and real job logs; see the deployment report in docs/CLOUD_WORKER.md. Database migrations and transactional RLS/security checks were executed through the connected Supabase tool. No real businesses were invented or imported to work around the restriction.
 
 ## Website concepts and outreach
 

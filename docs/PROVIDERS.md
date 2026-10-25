@@ -14,6 +14,10 @@
 
 The public map illustration uses Natural Earth land geometry distributed in `world-atlas` (public-domain cartographic data). It is not a live discovery map.
 
+## Optional cloud scheduler
+
+See [CLOUD_WORKER.md](CLOUD_WORKER.md). Cloud mode has a database-enforced global five-minute cooldown and 20 discovery attempts/day, plus transactional source writes. It never performs business-URL HTTP requests: completed reviews clearly record a **listing-only** scope and require human evidence review. The DNS-pinned website checks below describe the alternative Node worker, not the Edge Function. Do not run both workers concurrently.
+
 ## Website verification
 
 `BusinessProvider`, `WebsiteSearchProvider`, and `AIProvider` isolate integrations from UI and persistence.

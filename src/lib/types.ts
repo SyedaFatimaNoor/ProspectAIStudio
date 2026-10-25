@@ -87,7 +87,20 @@ export type Workspace = {
     verification_threshold: number;
     retention_days: number;
   } | null;
-  config: { database: boolean; discovery: boolean; ai: boolean };
+  config: {
+    database: boolean;
+    discovery: boolean;
+    ai: boolean;
+    worker?: {
+      enabled: boolean;
+      mode: "listing-only";
+      daily_limit: number;
+      daily_attempts: number;
+      interval_minutes: number;
+      last_started_at: string | null;
+      last_finished_at: string | null;
+    };
+  };
   windowed?: boolean;
   error?: string;
 };

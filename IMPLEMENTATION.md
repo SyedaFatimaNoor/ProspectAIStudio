@@ -10,6 +10,7 @@
 - [x] Draft editing, saved-version approval gate, manual reply/follow-up events, suppression and database send guard.
 - [x] Production build, strict typecheck, unit tests, Playwright workflow tests and automated accessibility checks.
 - [x] Live transactional database isolation/security tests with all fixtures rolled back.
+- [x] Optional capped Supabase cloud discovery worker, listing-only evidence scope, private scheduler authentication, atomic results and cloud-mode UI notices.
 - [x] Setup, provider policies, security boundaries, deployment instructions, and honest limitations.
 
 ## Deliberately not claimed complete
