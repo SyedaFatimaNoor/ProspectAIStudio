@@ -171,7 +171,10 @@ export default function SignIn() {
           </div>
           <p className="auth-terms">
             By continuing, you agree to use public business information
-            responsibly and respect recipients’ privacy and preferences.
+            responsibly and respect recipients’ privacy and preferences.{" "}
+            <Link href="/privacy">Privacy &amp; data handling</Link>
+            {" · "}
+            <Link href="/responsible-use">Responsible use</Link>
           </p>
         </form>
         <div className="auth-form-footer">

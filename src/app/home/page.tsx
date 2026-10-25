@@ -1,4 +1,4 @@
-import { Landing } from "@/components/landing";
-export default function Home() {
-  return <Landing />;
+import { permanentRedirect } from "next/navigation";
+export default function HomeAlias() {
+  permanentRedirect("/");
 }

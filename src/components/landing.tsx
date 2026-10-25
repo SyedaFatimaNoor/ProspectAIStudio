@@ -555,7 +555,8 @@ export function Landing() {
           <p>Discover potential. Build real connections.</p>
         </div>
         <nav>
-          <a href="#trust">Privacy & responsible use</a>
+          <Link href="/privacy">Privacy &amp; data handling</Link>
+          <Link href="/responsible-use">Responsible use</Link>
           <a href="#faq">FAQs</a>
           <Link href="/settings">Integrations</Link>
           <Link href="/sign-in">

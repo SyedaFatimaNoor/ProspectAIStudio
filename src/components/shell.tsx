@@ -136,7 +136,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <br />
               not another spam campaign.
             </p>
-            <Link href="/home#trust">
+            <Link href="/#trust">
               Our approach <ArrowUpRight size={13} />
             </Link>
           </div>
@@ -188,10 +188,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <kbd>⌘ K</kbd>
             </button>
             <span className="topbar-separator" />
-            <a href="/home#trust" className="system-status">
+            <Link href="/privacy" className="system-status">
               <span />
               Privacy first
-            </a>
+            </Link>
             <button
               className="top-avatar"
               onClick={() => router.push("/sign-in")}
