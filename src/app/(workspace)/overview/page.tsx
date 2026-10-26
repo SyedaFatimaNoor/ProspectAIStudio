@@ -27,7 +27,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeading, Panel, EmptyState, Badge } from "@/components/shared";
 import { formatDate } from "@/lib/utils";
 export default function Overview() {
-  const { data, loading } = useWorkspace();
+  const { data, loading, connectionError } = useWorkspace();
   const [period, setPeriod] = useState("30");
   const cutoff = Date.now() - Number(period) * 86400000;
   const leads = data.businesses.filter(
@@ -113,7 +113,7 @@ export default function Overview() {
           </Link>
         </Button>
       </PageHeading>
-      {!data.user && (
+      {!data.user && !connectionError && (
         <div className="preview-banner">
           <span>
             <span className="preview-dot" />

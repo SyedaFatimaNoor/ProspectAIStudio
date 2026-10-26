@@ -11,12 +11,24 @@ export const categorySchema = z.enum([
   "gym",
 ]);
 export const jobSchema = z.object({
-  country: text(80),
-  city: text(100),
+  country: z
+    .string()
+    .trim()
+    .min(1, "Please enter a country.")
+    .max(80, "Use 80 characters or fewer for the country."),
+  city: z
+    .string()
+    .trim()
+    .min(1, "Please enter a city.")
+    .max(100, "Use 100 characters or fewer for the city."),
   category: categorySchema,
   keywords: z.string().trim().max(120).default(""),
   service_area: z.string().trim().max(150).default(""),
-  max_results: z.number().int().min(1).max(100),
+  max_results: z
+    .number({ error: "Enter a whole number of results." })
+    .int("Enter a whole number of results.")
+    .min(1, "Request at least 1 result.")
+    .max(100, "Request no more than 100 results."),
   requirements: z.object({
     public_contact: z.boolean(),
     website_review: z.boolean(),

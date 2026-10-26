@@ -126,14 +126,20 @@ export function Field({
   label,
   children,
   hint,
+  error,
 }: {
   label: string;
   children: React.ReactNode;
   hint?: string;
+  error?: string;
 }) {
   const uid = useId();
   const child = isValidElement(children)
-    ? (children as ReactElement<{ id?: string; "aria-describedby"?: string }>)
+    ? (children as ReactElement<{
+        id?: string;
+        "aria-describedby"?: string;
+        "aria-invalid"?: boolean | "true" | "false" | "grammar" | "spelling";
+      }>)
     : null;
   const id = child?.props.id || uid;
   return (
@@ -142,10 +148,23 @@ export function Field({
       {child
         ? cloneElement(child, {
             id,
-            "aria-describedby": hint ? `${uid}-hint` : undefined,
+            "aria-describedby":
+              [
+                child.props["aria-describedby"],
+                hint && `${uid}-hint`,
+                error && `${uid}-error`,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined,
+            "aria-invalid": error ? true : child.props["aria-invalid"],
           })
         : children}
       {hint && <small id={`${uid}-hint`}>{hint}</small>}
+      {error && (
+        <small className="field-error" id={`${uid}-error`}>
+          {error}
+        </small>
+      )}
     </div>
   );
 }

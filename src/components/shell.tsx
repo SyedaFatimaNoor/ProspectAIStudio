@@ -29,6 +29,7 @@ import { useWorkspace } from "./workspace-provider";
 import { Button } from "./ui/button";
 import { Dialog } from "./ui/dialog";
 import { Notice } from "./shared";
+import { WorkspaceOnboarding } from "./workspace-onboarding";
 const nav = [
   { href: "/overview", label: "Overview", icon: LayoutDashboard },
   { href: "/discovery", label: "Discover businesses", icon: Compass },
@@ -40,7 +41,7 @@ const nav = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const { data } = useWorkspace();
+  const { data, loading, connectionError } = useWorkspace();
   const [mobile, setMobile] = useState(false);
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
@@ -88,7 +89,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <span>
             <strong>{data.user ? "My workspace" : "Your workspace"}</strong>
             <small>
-              {data.user ? "Personal workspace" : "Preview · read-only"}
+              {loading
+                ? "Loading workspace…"
+                : connectionError
+                  ? "Connection unconfirmed"
+                  : data.user
+                    ? "Personal workspace"
+                    : "Preview · read-only"}
             </small>
           </span>
           <ChevronDown size={15} />
@@ -136,7 +143,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <br />
               not another spam campaign.
             </p>
-            <Link href="/home#trust">
+            <Link href="/#trust">
               Our approach <ArrowUpRight size={13} />
             </Link>
           </div>
@@ -154,7 +161,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
                   "Your account"}
               </strong>
               <small>
-                {data.user ? "Workspace member" : "Sign in to get started"}
+                {loading
+                  ? "Loading account…"
+                  : connectionError
+                    ? "Account status unconfirmed"
+                    : data.user
+                      ? "Workspace member"
+                      : "Sign in to get started"}
               </small>
             </span>
             <ChevronDown size={15} />
@@ -188,10 +201,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <kbd>⌘ K</kbd>
             </button>
             <span className="topbar-separator" />
-            <a href="/home#trust" className="system-status">
+            <Link href="/privacy" className="system-status">
               <span />
               Privacy first
-            </a>
+            </Link>
             <button
               className="top-avatar"
               onClick={() => router.push("/sign-in")}
@@ -211,6 +224,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Notice>
             </div>
           )}
+          <WorkspaceOnboarding />
           {children}
         </main>
         <footer className="app-footer">
