@@ -34,6 +34,7 @@ import {
   discoveryResultLimit,
   validateDiscoveryForm,
   discoveryBlockReason,
+  discoveryJobErrorMessage,
 } from "@/lib/discovery-form";
 import { workerIsKnownPaused } from "@/lib/cloud-worker";
 export default function Discovery() {
@@ -547,12 +548,16 @@ export default function Discovery() {
                   </div>
                   {jobBlocked && (
                     <Notice tone="error">
-                      Blocked — worker unavailable. This job has not been sent
-                      to the provider. Resolve the worker setup before resuming
-                      it.
+                      {j.error
+                        ? "Blocked — worker unavailable. A prior provider attempt failed, so this job will not retry until the worker setup is reviewed."
+                        : "Blocked — worker unavailable. This job has not been sent to the provider. Resolve the worker setup before resuming it."}
                     </Notice>
                   )}
-                  {j.error && <Notice tone="error">{j.error}</Notice>}
+                  {j.error && (
+                    <Notice tone="error">
+                      {discoveryJobErrorMessage(j.error)}
+                    </Notice>
+                  )}
                   {expanded === j.id && (
                     <div className="job-logs">
                       {j.logs.length ? (
