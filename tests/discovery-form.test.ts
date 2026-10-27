@@ -4,6 +4,7 @@ import {
   discoveryResultLimit,
   validateDiscoveryForm,
   discoveryBlockReason,
+  discoveryJobErrorMessage,
 } from "../src/lib/discovery-form";
 import { emptyWorkspace, type Workspace } from "../src/lib/types";
 import { workerIsKnownPaused } from "../src/lib/cloud-worker";
@@ -69,6 +70,21 @@ test("unsupported categories and oversized optional context are still rejected",
     { service_area: "x".repeat(151) },
   ])
     assert.equal(validateDiscoveryForm({ ...valid, ...patch }).success, false);
+});
+
+test("a historical HTTP 406 is accurately labelled as a provider rejection", () => {
+  assert.match(
+    discoveryJobErrorMessage(
+      "OpenStreetMap provider returned HTTP 406. Respect endpoint rate limits and retry later.",
+    ),
+    /endpoint rejected this request/,
+  );
+  assert.doesNotMatch(
+    discoveryJobErrorMessage(
+      "OpenStreetMap provider returned HTTP 406. Respect endpoint rate limits and retry later.",
+    ),
+    /Respect endpoint rate limits/,
+  );
 });
 
 test("preview, loading, failed connection and missing setup cannot queue discovery", () => {

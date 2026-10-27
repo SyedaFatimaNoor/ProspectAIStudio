@@ -214,6 +214,42 @@ test("a paused worker labels existing queued work as blocked and prevents a resu
   await expect(job.getByRole("button", { name: "Resume job" })).toHaveCount(0);
 });
 
+test("a blocked historical provider rejection is not mislabeled as rate limiting", async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  state.config.worker = {
+    enabled: false,
+    mode: "listing-only",
+    daily_limit: 20,
+    daily_attempts: 1,
+    interval_minutes: 5,
+    last_started_at: null,
+    last_finished_at: null,
+  };
+  state.jobs = [
+    {
+      id: "test-only-rejected-job",
+      country: "Pakistan",
+      city: "Karachi",
+      category: "cafe",
+      max_results: 1,
+      status: "queued",
+      processed: 0,
+      total: 0,
+      error:
+        "OpenStreetMap provider returned HTTP 406. Respect endpoint rate limits and retry later.",
+      logs: ["TEST FIXTURE — previous provider rejection"],
+      created_at: new Date().toISOString(),
+    },
+  ];
+  await page.goto("/discovery");
+  const job = page.locator(".job-card");
+  await expect(job).toContainText("A prior provider attempt failed");
+  await expect(job).toContainText("The endpoint rejected this request");
+  await expect(job).not.toContainText("Respect endpoint rate limits");
+});
+
 test("settings separates preview configuration from worker scheduling and makes refresh scope explicit", async ({
   page,
 }) => {

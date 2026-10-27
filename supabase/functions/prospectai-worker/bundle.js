@@ -88,6 +88,16 @@ function overpassQuery(input) {
   const [key, value] = categoryTag[input.category];
   return `[out:json][timeout:35];(area["admin_level"="2"]["name"~${country},i];area["admin_level"="2"]["name:en"~${country},i];)->.country;(rel(area.country)["name"~${city},i]["boundary"="administrative"];rel(area.country)["name:en"~${city},i]["boundary"="administrative"];)->.city_rel;.city_rel map_to_area->.city;nwr(area.city)["${key}"="${value}"]["name"];out meta center ${Math.min(300, input.max_results * 3)};`;
 }
+function overpassFailureMessage(status) {
+  const prefix = `OpenStreetMap provider returned HTTP ${status}.`;
+  if (status === 406)
+    return `${prefix} The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.`;
+  if (status === 429)
+    return `${prefix} The provider rate limited this request; the worker will use bounded backoff.`;
+  if ([400, 401, 403, 404, 405, 410, 422].includes(status))
+    return `${prefix} The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.`;
+  return `${prefix} The provider did not complete the request; retries are bounded and never treated as an empty successful search.`;
+}
 async function discoverOpenStreetMap(input, endpoint, signal) {
   if (!endpoint)
     throw new Error("No Overpass endpoint configured. No source was queried.");
@@ -97,16 +107,17 @@ async function discoverOpenStreetMap(input, endpoint, signal) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "ProspectAI/1.0 (bounded public business research)"
+      // State the narrow response type and an identifiable product URL. This
+      // lets an endpoint apply its published policy deliberately; it is not a
+      // substitute for policy review, rate-limit handling, or authentication.
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "User-Agent": "ProspectAIStudio/1.1 (+https://prospectaistudio.vercel.app/responsible-use)"
     },
     body: new URLSearchParams({ data: overpassQuery(input) }),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(45e3)]) : AbortSignal.timeout(45e3)
   });
-  if (!res.ok)
-    throw new Error(
-      `OpenStreetMap provider returned HTTP ${res.status}. Respect endpoint rate limits and retry later.`
-    );
+  if (!res.ok) throw new Error(overpassFailureMessage(res.status));
   const reader = res.body?.getReader();
   if (!reader) throw new Error("Provider returned no response body.");
   let body = "";

@@ -30,6 +30,17 @@ export function validateDiscoveryForm(input: unknown, limit = 100) {
   return { success: true as const, data: parsed.data, errors };
 }
 
+export function discoveryJobErrorMessage(error: string) {
+  const legacy406 =
+    "OpenStreetMap provider returned HTTP 406. Respect endpoint rate limits and retry later.";
+  if (error.includes(legacy406))
+    return error.replace(
+      legacy406,
+      "OpenStreetMap provider returned HTTP 406. The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.",
+    );
+  return error;
+}
+
 export function discoveryBlockReason(
   data: Workspace,
   loading = false,
