@@ -12,14 +12,14 @@ const Context = createContext<{
   data: Workspace;
   loading: boolean;
   connectionError: string | null;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<boolean>;
   action: (type: string, payload: Record<string, unknown>) => Promise<unknown>;
   notify: (message: string, error?: boolean) => void;
 }>({
   data: emptyWorkspace,
   loading: true,
   connectionError: null,
-  refresh: async () => {},
+  refresh: async () => false,
   action: async () => {},
   notify: () => {},
 });
@@ -45,6 +45,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         );
       setData(result);
       setConnectionError(null);
+      return true;
     } catch (error) {
       const message =
         error instanceof Error
@@ -52,6 +53,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           : "Unable to connect. Check your connection and try again.";
       setConnectionError(message);
       notify(message, true);
+      return false;
     } finally {
       setLoading(false);
     }

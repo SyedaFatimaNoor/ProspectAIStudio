@@ -6,6 +6,7 @@ import {
   discoveryBlockReason,
 } from "../src/lib/discovery-form";
 import { emptyWorkspace, type Workspace } from "../src/lib/types";
+import { workerIsKnownPaused } from "../src/lib/cloud-worker";
 
 const valid = {
   country: " Pakistan ",
@@ -93,7 +94,11 @@ test("preview, loading, failed connection and missing setup cannot queue discove
   );
 });
 
-test("a known paused cloud worker is blocked; an unknown separate worker is not falsely treated as down", () => {
+test("only an explicit paused worker blocks discovery; an unknown separate worker is not falsely treated as down", () => {
+  assert.equal(workerIsKnownPaused(undefined), false);
+  assert.equal(workerIsKnownPaused({ enabled: true }), false);
+  assert.equal(workerIsKnownPaused({ enabled: false }), true);
+  assert.equal(workerIsKnownPaused({}), false);
   const data = ready();
   assert.equal(discoveryBlockReason(data), null);
   data.config.worker = {

@@ -10,6 +10,10 @@ import {
   manualSchema,
 } from "@/lib/validation";
 import { CompatibleAI } from "@/lib/ai";
+import {
+  pausedCloudWorkerMessage,
+  workerIsKnownPaused,
+} from "@/lib/cloud-worker";
 export const maxDuration = 90;
 export async function POST(req: NextRequest) {
   try {
@@ -104,6 +108,17 @@ export async function POST(req: NextRequest) {
             },
             { status: 409 },
           );
+        // A missing status function is intentionally not treated as a failure:
+        // self-hosted deployments may use a separate worker. An explicit pause,
+        // however, must reject direct API calls as well as the disabled UI.
+        const { data: worker, error: workerStatusError } = await db.rpc(
+          "pa_cloud_worker_status",
+        );
+        if (!workerStatusError && workerIsKnownPaused(worker))
+          return NextResponse.json(
+            { error: pausedCloudWorkerMessage },
+            { status: 409 },
+          );
         const v = jobSchema.parse(input);
         const { data: settings } = await db
           .from("pa_integration_settings")
@@ -140,6 +155,13 @@ export async function POST(req: NextRequest) {
           throw new Error("A finished job cannot be changed.");
         if (status === "queued" && !["paused", "failed"].includes(j.status))
           throw new Error("Only paused or failed jobs can be resumed.");
+        if (status === "queued") {
+          const { data: worker, error: workerStatusError } = await db.rpc(
+            "pa_cloud_worker_status",
+          );
+          if (!workerStatusError && workerIsKnownPaused(worker))
+            throw new Error(pausedCloudWorkerMessage);
+        }
         if (status === "paused" && !["queued", "running"].includes(j.status))
           throw new Error("Only queued or running jobs can be paused.");
         result = await update("discovery_jobs", id, {

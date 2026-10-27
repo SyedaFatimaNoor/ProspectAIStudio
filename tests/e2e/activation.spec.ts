@@ -158,12 +158,17 @@ for (const mode of ["preview", "source-missing", "paused"] as const) {
       0,
     );
     await city(page).fill("Karachi");
-    await start(page).click();
+    await expect(start(page)).toBeDisabled();
+    await expect(start(page)).toHaveAttribute(
+      "aria-describedby",
+      "discovery-unavailable",
+    );
+    await page.locator("form.form-stack").dispatchEvent("submit");
     await expect(page.getByRole("main").getByRole("alert")).toContainText(
       mode === "preview"
         ? "Sign in to queue"
         : mode === "paused"
-          ? "Cloud discovery is paused"
+          ? "Discovery is temporarily unavailable because the source worker is paused"
           : "No discovery source is configured",
     );
     expect(actions).toBe(0);
@@ -172,6 +177,71 @@ for (const mode of ["preview", "source-missing", "paused"] as const) {
     ).toBeVisible();
   });
 }
+
+test("a paused worker labels existing queued work as blocked and prevents a resume control", async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  state.config.worker = {
+    enabled: false,
+    mode: "listing-only",
+    daily_limit: 20,
+    daily_attempts: 1,
+    interval_minutes: 5,
+    last_started_at: null,
+    last_finished_at: null,
+  };
+  state.jobs = [
+    {
+      id: "test-only-queued-job",
+      country: "Pakistan",
+      city: "Karachi",
+      category: "cafe",
+      max_results: 1,
+      status: "queued",
+      processed: 0,
+      total: 0,
+      error: null,
+      logs: ["TEST FIXTURE — job was queued before the worker pause"],
+      created_at: new Date().toISOString(),
+    },
+  ];
+  await page.goto("/discovery");
+  const job = page.locator(".job-card");
+  await expect(job).toContainText("Blocked — worker unavailable");
+  await expect(job).toContainText("This job has not been sent to the provider");
+  await expect(job.getByRole("button", { name: "Pause job" })).toHaveCount(0);
+  await expect(job.getByRole("button", { name: "Resume job" })).toHaveCount(0);
+});
+
+test("settings separates preview configuration from worker scheduling and makes refresh scope explicit", async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  state.config.worker = {
+    enabled: false,
+    mode: "listing-only",
+    daily_limit: 20,
+    daily_attempts: 1,
+    interval_minutes: 5,
+    last_started_at: null,
+    last_finished_at: "2026-10-27T08:15:00.000Z",
+  };
+  await page.goto("/settings");
+  const card = page
+    .locator(".integration-card")
+    .filter({ has: page.getByRole("heading", { name: "OpenStreetMap" }) });
+  await expect(card).toContainText("Worker paused");
+  await expect(card).toContainText("Reachability");
+  await expect(card).toContainText("Not tested — no provider request was made");
+  await expect(card).toContainText("Paused — new discovery jobs are blocked");
+  await page
+    .getByRole("button", { name: "Refresh workspace status", exact: true })
+    .click();
+  await expect(page.getByRole("status")).toContainText(
+    "This reads saved configuration and worker state; it does not probe external providers.",
+  );
+});
 
 test("server rejection stays inline, preserves input and permits an explicit retry without claiming source success", async ({
   page,
@@ -345,7 +415,8 @@ test("failed refresh preserves the last account/form but prevents a stale discov
   );
   await expect(city(page)).toHaveValue("Karachi");
   await expect(page.locator(".profile strong")).toHaveText("fixture");
-  await start(page).click();
+  await expect(start(page)).toBeDisabled();
+  await page.locator("form.form-stack").dispatchEvent("submit");
   await expect(page.getByRole("main").getByRole("alert")).toContainText(
     "Workspace connection failed",
   );
