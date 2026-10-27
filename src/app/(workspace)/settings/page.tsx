@@ -62,11 +62,11 @@ const integrations = [
     title: "Your AI provider",
     category: "CONCEPTS & PERSONALISATION",
     description:
-      "Connect a local model through Ollama or your preferred OpenAI-compatible provider.",
+      "Use Ollama Cloud or a server-side OpenAI-compatible provider for optional concept drafts.",
     icon: Sparkles,
-    env: "AI_BASE_URL=http://127.0.0.1:11434/v1\nAI_MODEL=your-installed-model\nAI_API_KEY=optional",
-    help: "Use a locally installed model at no provider cost, subject to your own hardware. Configuration is server-only. AI cannot browse or execute actions; supplied facts are treated as untrusted data.",
-    url: "https://github.com/ollama/ollama",
+    env: "OLLAMA_API_KEY=server-only\nOllama Cloud uses https://ollama.com and gemma4:31b\nAI_BASE_URL / AI_MODEL for another compatible provider",
+    help: "Ollama Cloud and other providers are called only from server code. A local Ollama URL works only when the app server can reach it; Vercel cannot call your laptop. AI cannot browse or execute actions; supplied facts are treated as untrusted data.",
+    url: "https://docs.ollama.com",
   },
   {
     key: "email",

@@ -75,16 +75,27 @@ No source is enabled by default. Without `OVERPASS_URL`, creating a discovery re
 
 **Draft-only means draft-only:** this release has no sending adapters, no bulk dispatch, and no delivery webhooks. Approval does not send anything. The database rejects sending even if an API/UI guard is bypassed.
 
-### Optional local AI (no paid API required)
+### Optional AI — Ollama Cloud or a compatible server
 
 ```dotenv
+# Ollama Cloud: server-only key; uses https://ollama.com/api/chat and gemma4:31b.
+OLLAMA_API_KEY=
+
+# Optional fallback for another OpenAI-compatible provider or a local server.
 AI_BASE_URL=http://127.0.0.1:11434/v1
-AI_MODEL=your-installed-ollama-model
-# Only if required by your provider:
+AI_MODEL=your-installed-model
 AI_API_KEY=
 ```
 
-Use `localhost` only for a model on the **server machine**. Browser code uses relative application API URLs and never calls a server on the user's localhost. A remote deployment needs a privately reachable model endpoint and appropriate authorisation. AI is server-only and receives a small whitelist of supported facts, not secrets or contact data.
+Use `localhost` only for a model on the **server machine**. Vercel cannot access an Ollama instance running on your laptop; use Ollama Cloud or a privately reachable server endpoint instead. Browser code uses relative application API URLs and never calls a model provider directly. AI is server-only and receives a small whitelist of supported facts, not secrets or contact data.
+
+To make one server-side smoke-test request through the application's Ollama client, set `OLLAMA_API_KEY` in an ignored local `.env` file and run:
+
+```bash
+node --env-file=.env --import tsx scripts/test-ollama.ts
+```
+
+The command prints only the real provider reply. It is not an application health check and should not be run from browser code.
 
 See [provider documentation](docs/PROVIDERS.md) for data restrictions, verification scoring, failure handling, AI boundaries, and messaging requirements.
 
