@@ -35,6 +35,7 @@ import {
   validateDiscoveryForm,
   discoveryBlockReason,
 } from "@/lib/discovery-form";
+import { workerIsKnownPaused } from "@/lib/cloud-worker";
 export default function Discovery() {
   const { data, loading, connectionError, action, notify, refresh } =
     useWorkspace();
@@ -67,6 +68,8 @@ export default function Discovery() {
     limit,
   );
   const errors = attempted ? validation.errors : {};
+  const blockedReason = discoveryBlockReason(data, loading, connectionError);
+  const workerPaused = workerIsKnownPaused(data.config.worker);
   const set = (key: string, value: unknown) => {
     setForm((f) => ({ ...f, [key]: value }));
     setSubmissionError(null);
@@ -94,10 +97,9 @@ export default function Discovery() {
       });
       return;
     }
-    const blocked = discoveryBlockReason(data, loading, connectionError);
-    if (blocked) {
-      setSubmissionError(blocked);
-      notify(blocked, true);
+    if (blockedReason) {
+      setSubmissionError(blockedReason);
+      notify(blockedReason, true);
       return;
     }
     setBusy(true);
@@ -134,11 +136,13 @@ export default function Discovery() {
           Refresh jobs
         </Button>
       </PageHeading>
-      {data.config.worker && !data.config.worker.enabled && (
+      {workerPaused && (
         <Notice tone="error">
-          Cloud discovery is paused. Queued jobs will not run until the operator
-          resolves the provider/setup issue and re-enables the scheduler. Check
-          failed job logs; no source results are fabricated.
+          Cloud discovery is paused, so new searches are blocked. The operator
+          must resolve the provider/setup issue before re-enabling the
+          scheduler. Existing queued jobs are shown as blocked below; no source
+          results are fabricated.{" "}
+          <Link href="/settings">View setup instructions</Link>.
         </Notice>
       )}
       {data.config.worker?.enabled && (
@@ -299,16 +303,11 @@ export default function Discovery() {
                 </small>
               </span>
               <Badge
-                tone={
-                  !data.config.discovery ||
-                  data.config.worker?.enabled === false
-                    ? "amber"
-                    : "blue"
-                }
+                tone={!data.config.discovery || workerPaused ? "amber" : "blue"}
               >
                 {!data.config.discovery
                   ? "Setup needed"
-                  : data.config.worker?.enabled === false
+                  : workerPaused
                     ? "Worker paused"
                     : "Source configured"}
               </Badge>
@@ -372,12 +371,28 @@ export default function Discovery() {
                 <ShieldCheck size={14} />
                 No scraping. No invented leads.
               </span>
-              <Button type="submit" disabled={busy}>
+              <Button
+                type="submit"
+                disabled={busy || Boolean(blockedReason)}
+                aria-describedby={
+                  blockedReason ? "discovery-unavailable" : undefined
+                }
+              >
                 {busy ? <Spinner /> : <Compass size={16} />}
                 {busy ? "Queuing discovery…" : "Start discovery"}
                 <ArrowRight size={16} />
               </Button>
             </div>
+            {blockedReason && (
+              <p
+                className="form-submit-help"
+                id="discovery-unavailable"
+                role="status"
+              >
+                {blockedReason}{" "}
+                <Link href="/settings">View setup instructions</Link>.
+              </p>
+            )}
           </form>
         </Panel>
         <aside className="discovery-aside">
@@ -449,97 +464,110 @@ export default function Discovery() {
           />
         ) : (
           <div className="job-list">
-            {data.jobs.map((j) => (
-              <div className="job-card" key={j.id}>
-                <div className="job-row">
-                  <div className="job-icon">
-                    <Compass size={19} />
-                  </div>
-                  <div className="job-name">
-                    <strong>
-                      {j.category.replaceAll("_", " ")} in {j.city}, {j.country}
-                    </strong>
-                    <small>
-                      OpenStreetMap · {formatDate(j.created_at)} · {j.processed}{" "}
-                      / {j.total || j.max_results} processed
-                    </small>
-                  </div>
-                  <Badge
-                    tone={
-                      j.status === "failed"
-                        ? "red"
-                        : j.status === "completed"
-                          ? "green"
-                          : "blue"
-                    }
-                  >
-                    {j.status}
-                  </Badge>
-                  <div className="job-controls">
-                    {["queued", "running"].includes(j.status) && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="Pause job"
-                        onClick={() => void control(j.id, "paused")}
-                      >
-                        <Pause size={16} />
-                      </Button>
-                    )}
-                    {["paused", "failed"].includes(j.status) && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="Resume job"
-                        onClick={() => void control(j.id, "queued")}
-                      >
-                        <Play size={16} />
-                      </Button>
-                    )}
-                    {!["cancelled", "completed"].includes(j.status) && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label="Cancel job"
-                        onClick={() => void control(j.id, "cancelled")}
-                      >
-                        <Square size={15} />
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setExpanded(expanded === j.id ? null : j.id)
+            {data.jobs.map((j) => {
+              const jobBlocked = workerPaused && j.status === "queued";
+              return (
+                <div className="job-card" key={j.id}>
+                  <div className="job-row">
+                    <div className="job-icon">
+                      <Compass size={19} />
+                    </div>
+                    <div className="job-name">
+                      <strong>
+                        {j.category.replaceAll("_", " ")} in {j.city},{" "}
+                        {j.country}
+                      </strong>
+                      <small>
+                        OpenStreetMap · {formatDate(j.created_at)} ·{" "}
+                        {j.processed} / {j.total || j.max_results} processed
+                      </small>
+                    </div>
+                    <Badge
+                      tone={
+                        jobBlocked || j.status === "failed"
+                          ? "red"
+                          : j.status === "completed"
+                            ? "green"
+                            : "blue"
                       }
                     >
-                      <Terminal size={14} />
-                      Logs
-                    </Button>
+                      {jobBlocked ? "Blocked — worker unavailable" : j.status}
+                    </Badge>
+                    <div className="job-controls">
+                      {!jobBlocked &&
+                        ["queued", "running"].includes(j.status) && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label="Pause job"
+                            onClick={() => void control(j.id, "paused")}
+                          >
+                            <Pause size={16} />
+                          </Button>
+                        )}
+                      {!workerPaused &&
+                        ["paused", "failed"].includes(j.status) && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label="Resume job"
+                            onClick={() => void control(j.id, "queued")}
+                          >
+                            <Play size={16} />
+                          </Button>
+                        )}
+                      {!["cancelled", "completed"].includes(j.status) && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Cancel job"
+                          onClick={() => void control(j.id, "cancelled")}
+                        >
+                          <Square size={15} />
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setExpanded(expanded === j.id ? null : j.id)
+                        }
+                      >
+                        <Terminal size={14} />
+                        Logs
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <div className="job-progress">
-                  <span
-                    style={{
-                      width: `${j.status === "completed" ? 100 : Math.min(100, (j.processed / Math.max(1, j.total)) * 100)}%`,
-                    }}
-                  />
-                </div>
-                {j.error && <Notice tone="error">{j.error}</Notice>}
-                {expanded === j.id && (
-                  <div className="job-logs">
-                    {j.logs.length ? (
-                      j.logs.map((l, i) => <p key={i}>{l}</p>)
-                    ) : (
-                      <p>
-                        Waiting for a worker. Run npm run worker on a configured
-                        host.
-                      </p>
-                    )}
+                  <div className="job-progress">
+                    <span
+                      style={{
+                        width: `${j.status === "completed" ? 100 : Math.min(100, (j.processed / Math.max(1, j.total)) * 100)}%`,
+                      }}
+                    />
                   </div>
-                )}
-              </div>
-            ))}
+                  {jobBlocked && (
+                    <Notice tone="error">
+                      Blocked — worker unavailable. This job has not been sent
+                      to the provider. Resolve the worker setup before resuming
+                      it.
+                    </Notice>
+                  )}
+                  {j.error && <Notice tone="error">{j.error}</Notice>}
+                  {expanded === j.id && (
+                    <div className="job-logs">
+                      {j.logs.length ? (
+                        j.logs.map((l, i) => <p key={i}>{l}</p>)
+                      ) : (
+                        <p>
+                          Waiting for a worker. Run npm run worker on a
+                          configured host.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </Panel>

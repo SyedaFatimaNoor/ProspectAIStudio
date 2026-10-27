@@ -32,6 +32,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { browserSupabase } from "@/lib/browser-supabase";
+import { workerIsKnownPaused } from "@/lib/cloud-worker";
+import type { Workspace } from "@/lib/types";
 const integrations = [
   {
     key: "database",
@@ -89,12 +91,121 @@ const integrations = [
     url: "",
   },
 ];
+
+type IntegrationState = {
+  label: string;
+  tone: "green" | "blue" | "amber" | "red" | "neutral";
+  configured: boolean;
+  configuration: string;
+  reachability: string;
+  worker?: string;
+  lastActivity?: string | null;
+};
+
+function integrationState(
+  key: string,
+  data: Workspace,
+  loading: boolean,
+  connectionError: string | null,
+): IntegrationState {
+  if (key === "email" || key === "whatsapp")
+    return {
+      label: "Draft only",
+      tone: "neutral",
+      configured: false,
+      configuration: "Sending adapter is intentionally disabled",
+      reachability: "Not applicable",
+    };
+  if (loading)
+    return {
+      label: "Loading status",
+      tone: "neutral",
+      configured: false,
+      configuration: "Checking workspace configuration",
+      reachability: "Not tested",
+    };
+  if (connectionError || data.error)
+    return {
+      label: "Status unavailable",
+      tone: "red",
+      configured: false,
+      configuration: "Could not refresh workspace status",
+      reachability: "Unknown",
+    };
+  const configured =
+    key === "database"
+      ? data.config.database
+      : key === "discovery"
+        ? data.config.discovery
+        : key === "ai"
+          ? data.config.ai
+          : false;
+  if (!configured)
+    return {
+      label: "Not configured",
+      tone: "amber",
+      configured: false,
+      configuration: "Required server configuration is missing",
+      reachability: "Not tested",
+    };
+  if (!data.user)
+    return {
+      label: "Preview: setup detected",
+      tone: "blue",
+      configured: true,
+      configuration: "Environment configuration detected",
+      reachability: "Not tested from a read-only preview",
+    };
+  if (key === "database")
+    return {
+      label: "Workspace connected",
+      tone: "green",
+      configured: true,
+      configuration: "Configured for this workspace",
+      reachability: "Workspace API connected",
+    };
+  if (key === "discovery" && workerIsKnownPaused(data.config.worker))
+    return {
+      label: "Worker paused",
+      tone: "amber",
+      configured: true,
+      configuration: "Source configuration detected",
+      reachability: "Not tested — no provider request was made",
+      worker: "Paused — new discovery jobs are blocked",
+      lastActivity: data.config.worker?.last_finished_at,
+    };
+  if (key === "discovery" && data.config.worker?.enabled)
+    return {
+      label: "Worker scheduled",
+      tone: "green",
+      configured: true,
+      configuration: "Source configuration detected",
+      reachability: "Not tested — configuration is not a provider health check",
+      worker: "Scheduled",
+      lastActivity: data.config.worker.last_finished_at,
+    };
+  return {
+    label:
+      key === "discovery"
+        ? "Configured — worker status unconfirmed"
+        : "Configured — not tested",
+    tone: "blue",
+    configured: true,
+    configuration: "Configured for this workspace",
+    reachability: "Not tested — configuration is not a provider health check",
+    ...(key === "discovery" ? { worker: "Status unconfirmed" } : {}),
+  };
+}
+
 export default function Settings() {
-  const { data, action, notify, refresh } = useWorkspace();
+  const { data, loading, connectionError, action, notify, refresh } =
+    useWorkspace();
   const router = useRouter();
   const [tab, setTab] = useState("integrations");
   const [detail, setDetail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState("");
   useEffect(() => {
     setDisplayName(data.user?.display_name || "");
@@ -118,6 +229,16 @@ export default function Settings() {
       setBusy(false);
     }
   }
+  async function checkStatus() {
+    setCheckingStatus(true);
+    const refreshed = await refresh();
+    setStatusMessage(
+      refreshed
+        ? `Workspace status refreshed at ${new Date().toLocaleTimeString()}. This reads saved configuration and worker state; it does not probe external providers.`
+        : "Unable to refresh workspace status. Check the connection and try again.",
+    );
+    setCheckingStatus(false);
+  }
   return (
     <>
       <PageHeading
@@ -125,11 +246,20 @@ export default function Settings() {
         title="Settings & integrations"
         description="Connect your tools. Set your boundaries. Keep control of your data."
       >
-        <Button variant="outline" onClick={() => void refresh()}>
-          <RefreshCw size={15} />
-          Check status
+        <Button
+          variant="outline"
+          disabled={checkingStatus}
+          onClick={() => void checkStatus()}
+        >
+          {checkingStatus ? <Spinner /> : <RefreshCw size={15} />}
+          {checkingStatus ? "Refreshing status…" : "Refresh workspace status"}
         </Button>
       </PageHeading>
+      {statusMessage && (
+        <p className="settings-status-feedback" role="status">
+          {statusMessage}
+        </p>
+      )}
       <div className="settings-tabs tabs">
         {[
           ["integrations", "Integrations"],
@@ -162,38 +292,54 @@ export default function Settings() {
           </div>
           <div className="integrations-grid">
             {integrations.map((i) => {
-              const connected =
-                data.config[i.key as keyof typeof data.config] || false;
+              const status = integrationState(
+                i.key,
+                data,
+                loading,
+                connectionError,
+              );
               return (
                 <div className="integration-card" key={i.key}>
                   <div className="integration-card-top">
                     <span className={`integration-logo ${i.key}`}>
                       <i.icon size={25} />
                     </span>
-                    <Badge
-                      tone={
-                        connected
-                          ? "green"
-                          : i.key === "email" || i.key === "whatsapp"
-                            ? "neutral"
-                            : "amber"
-                      }
-                    >
-                      {connected
-                        ? "Configured"
-                        : i.key === "email" || i.key === "whatsapp"
-                          ? "Draft only"
-                          : "Not configured"}
-                    </Badge>
+                    <Badge tone={status.tone}>{status.label}</Badge>
                   </div>
                   <div className="eyebrow">{i.category}</div>
                   <h2>{i.title}</h2>
                   <p>{i.description}</p>
+                  <dl className="integration-status-list">
+                    <div>
+                      <dt>Configuration</dt>
+                      <dd>{status.configuration}</dd>
+                    </div>
+                    <div>
+                      <dt>Reachability</dt>
+                      <dd>{status.reachability}</dd>
+                    </div>
+                    {status.worker && (
+                      <div>
+                        <dt>Worker</dt>
+                        <dd>{status.worker}</dd>
+                      </div>
+                    )}
+                    {status.lastActivity && (
+                      <div>
+                        <dt>Last worker activity</dt>
+                        <dd>
+                          {new Date(status.lastActivity).toLocaleString()}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
                   <button
                     className="integration-configure"
                     onClick={() => setDetail(i.key)}
                   >
-                    {connected ? "View configuration" : "Setup & limitations"}
+                    {status.configured
+                      ? "View configuration"
+                      : "Setup & limitations"}
                     <ArrowUpRight size={16} />
                   </button>
                 </div>
@@ -209,9 +355,11 @@ export default function Settings() {
             </div>
           </div>
           <Notice>
-            “Configured” means the required environment variables are present.
-            It does not guarantee provider reachability. Database and job errors
-            are surfaced in the workspace and job logs.
+            Configuration, reachability, and worker scheduling are separate
+            states. A configured source is not a successful provider check. The
+            status refresh reads saved workspace and worker state without
+            sending a provider request; database and job errors remain visible
+            in the workspace and job logs.
           </Notice>
         </>
       )}

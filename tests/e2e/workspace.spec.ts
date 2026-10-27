@@ -172,13 +172,21 @@ test("sign in has accessible labels and native validation", async ({
     .click();
   await expect(page.getByLabel("Password")).toHaveAttribute("minlength", "12");
 });
-test("real unconfigured discovery never reports success", async ({ page }) => {
+test("real unconfigured discovery is disabled and never reports success", async ({
+  page,
+}) => {
   await page.goto("/discovery");
   await page.getByLabel("City", { exact: true }).fill("Karachi");
-  await page
-    .getByRole("button", { name: "Start discovery", exact: true })
-    .click();
+  const start = page.getByRole("button", {
+    name: "Start discovery",
+    exact: true,
+  });
+  await expect(start).toBeDisabled();
   await expect(page.getByRole("status")).toContainText("Sign in");
+  await page.locator("form.form-stack").dispatchEvent("submit");
+  await expect(page.getByRole("main").getByRole("alert")).toContainText(
+    "Sign in",
+  );
   await expect(page.getByText("Your first search starts above")).toBeVisible();
 });
 test("starting a discovery queues a job and shows source logs (test provider fixture)", async ({
@@ -559,5 +567,12 @@ test("paused cloud worker explains that queued jobs cannot run", async ({
     },
   });
   await page.goto("/discovery");
-  await expect(page.getByText(/Cloud discovery is paused/)).toBeVisible();
+  await expect(
+    page.getByText("Cloud discovery is paused, so new searches are blocked.", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Start discovery", exact: true }),
+  ).toBeDisabled();
 });
