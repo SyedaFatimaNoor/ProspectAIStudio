@@ -18,7 +18,7 @@ import {
 } from "../src/lib/validation";
 import { factBasedConcept } from "../src/lib/proposal";
 import { csvCell } from "../src/lib/utils";
-import { CompatibleAI } from "../src/lib/ai";
+import { aiConfigured, CompatibleAI } from "../src/lib/ai";
 import type { Business } from "../src/lib/types";
 const business = {
   id: "bf4941be-e03a-454b-905c-ae57c247e8e3",
@@ -289,11 +289,87 @@ test("CSV export mitigates spreadsheet formula injection and quotes delimiters",
   assert.equal(csvCell("normal"), '"normal"');
 });
 test("AI gracefully reports missing configuration", async () => {
-  const old = process.env.AI_BASE_URL;
+  const old = {
+    ollama: process.env.OLLAMA_API_KEY,
+    base: process.env.AI_BASE_URL,
+    model: process.env.AI_MODEL,
+  };
+  delete process.env.OLLAMA_API_KEY;
   delete process.env.AI_BASE_URL;
-  await assert.rejects(
-    new CompatibleAI().generateConcept(business),
-    /AI is not configured/,
-  );
-  if (old) process.env.AI_BASE_URL = old;
+  delete process.env.AI_MODEL;
+  try {
+    assert.equal(aiConfigured(), false);
+    await assert.rejects(
+      new CompatibleAI().generateConcept(business),
+      /AI is not configured/,
+    );
+  } finally {
+    for (const [name, value] of Object.entries({
+      OLLAMA_API_KEY: old.ollama,
+      AI_BASE_URL: old.base,
+      AI_MODEL: old.model,
+    })) {
+      if (value) process.env[name] = value;
+      else delete process.env[name];
+    }
+  }
+});
+
+test("Ollama Cloud uses a dedicated server key and native bounded chat request", async () => {
+  const old = {
+    ollama: process.env.OLLAMA_API_KEY,
+    base: process.env.AI_BASE_URL,
+    model: process.env.AI_MODEL,
+    fetch: globalThis.fetch,
+  };
+  let url = "";
+  let init: RequestInit | undefined;
+  process.env.OLLAMA_API_KEY = "test-only-ollama-key";
+  delete process.env.AI_BASE_URL;
+  delete process.env.AI_MODEL;
+  globalThis.fetch = (async (input, request) => {
+    url = String(input);
+    init = request;
+    return new Response(
+      JSON.stringify({
+        model: "gemma4:31b",
+        message: { role: "assistant", content: "TEST ONLY — Ollama reply" },
+        done: true,
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+  try {
+    assert.equal(aiConfigured(), true);
+    assert.equal(
+      await new CompatibleAI().generateConcept({
+        name: "TEST ONLY — Fixture Café",
+        category: "cafe",
+        city: "Karachi",
+        country: "Pakistan",
+      }),
+      "TEST ONLY — Ollama reply",
+    );
+    const endpoint = new URL(url);
+    assert.equal(endpoint.protocol, "https:");
+    assert.equal(endpoint.hostname, "ollama.com");
+    assert.equal(endpoint.pathname, "/api/chat");
+    assert.equal(
+      new Headers(init?.headers).get("authorization"),
+      "Bearer test-only-ollama-key",
+    );
+    const request = JSON.parse(String(init?.body));
+    assert.equal(request.model, "gemma4:31b");
+    assert.equal(request.stream, false);
+    assert.equal(request.options.temperature, 0.4);
+    assert.equal(request.options.num_predict, 2200);
+  } finally {
+    if (old.ollama) process.env.OLLAMA_API_KEY = old.ollama;
+    else delete process.env.OLLAMA_API_KEY;
+    if (old.base) process.env.AI_BASE_URL = old.base;
+    else delete process.env.AI_BASE_URL;
+    if (old.model) process.env.AI_MODEL = old.model;
+    else delete process.env.AI_MODEL;
+    globalThis.fetch = old.fetch;
+  }
 });

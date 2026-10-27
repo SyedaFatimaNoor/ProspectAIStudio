@@ -51,9 +51,9 @@ Manual observations must be within the last 90 days. Different hosts are a minim
 
 ## Optional AI
 
-- OpenAI-compatible `/chat/completions` endpoint, optionally Ollama's local `/v1` interface.
-- `AI_BASE_URL`, `AI_MODEL`, optional `AI_API_KEY`; server-side only.
-- Local models require suitable hardware; no paid service is required for manual/fact-based drafts.
+- Ollama Cloud uses the server-side `OLLAMA_API_KEY` and native `https://ollama.com/api/chat` endpoint with `gemma4:31b`.
+- Existing OpenAI-compatible `/chat/completions` configuration remains available through `AI_BASE_URL`, `AI_MODEL`, and optional `AI_API_KEY`.
+- Local models require suitable hardware; no paid service is required for manual/fact-based drafts. A Vercel deployment cannot reach an Ollama instance on a developer laptop.
 - Only whitelisted name, category, city, and country are sent. No contact details, notes, scraped page content, cookies, or keys are included in the prompt.
 - Untrusted facts are JSON-delimited data under fixed system instructions. The model has no tools, network actions, database access, or send capability.
 - 60-second timeout, bounded output, human editing and review. Provider errors are surfaced without claiming success.
