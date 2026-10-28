@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -29,7 +29,13 @@ import { formatDate } from "@/lib/utils";
 export default function Overview() {
   const { data, loading, connectionError } = useWorkspace();
   const [period, setPeriod] = useState("30");
-  const cutoff = Date.now() - Number(period) * 86400000;
+  // This route is prerendered, so any wall-clock read during render is baked
+  // in at build time. Once the deploy crosses a day boundary (or the browser
+  // sits in another timezone) the client recomputes different labels and React
+  // aborts hydration. The rolling window is therefore resolved after mount.
+  const [clockReady, setClockReady] = useState(false);
+  useEffect(() => setClockReady(true), []);
+  const cutoff = clockReady ? Date.now() - Number(period) * 86400000 : 0;
   const leads = data.businesses.filter(
     (b) => new Date(b.created_at).getTime() >= cutoff,
   );
@@ -76,16 +82,19 @@ export default function Overview() {
       link: "/verification",
     },
   ];
-  const days = Array.from({ length: 14 }, (_, i) => {
-    const date = new Date();
-    date.setDate(date.getDate() - 13 + i);
-    return {
-      date,
-      count: leads.filter(
-        (b) => new Date(b.created_at).toDateString() === date.toDateString(),
-      ).length,
-    };
-  });
+  const days = useMemo(() => {
+    if (!clockReady) return [];
+    return Array.from({ length: 14 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - 13 + i);
+      return {
+        date,
+        count: leads.filter(
+          (b) => new Date(b.created_at).toDateString() === date.toDateString(),
+        ).length,
+      };
+    });
+  }, [clockReady, leads]);
   const max = Math.max(2, ...days.map((d) => d.count));
   return (
     <>
@@ -256,9 +265,13 @@ export default function Overview() {
             </div>
           </div>
           <div className="chart-x">
-            {[0, 3, 6, 9, 13].map((i) => (
-              <span key={i}>{formatDate(days[i].date.toISOString())}</span>
-            ))}
+            {(days.length ? [0, 3, 6, 9, 13] : [-1, -1, -1, -1, -1]).map(
+              (i, slot) => (
+                <span key={slot}>
+                  {i < 0 ? "—" : formatDate(days[i].date.toISOString())}
+                </span>
+              ),
+            )}
           </div>
           <div className="chart-bottom">
             <ShieldCheck size={14} />

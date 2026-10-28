@@ -178,3 +178,27 @@ test("homepage footer wraps on mobile and workspace trust links use real canonic
     page.getByRole("link", { name: "Privacy first", exact: true }),
   ).toHaveAttribute("href", "/privacy");
 });
+
+test("prerendered routes hydrate without console errors or uncaught exceptions", async ({
+  page,
+}) => {
+  // A statically prerendered page that reads the wall clock during render
+  // matches itself only on the day it was built. These assertions catch the
+  // class of hydration defect that survives same-day local test runs.
+  for (const path of [...PUBLIC_PATHS, ...PRIVATE_PATHS]) {
+    const problems: string[] = [];
+    const onConsole = (m: { type: () => string; text: () => string }) => {
+      if (m.type() === "error") problems.push(`console: ${m.text()}`);
+    };
+    const onPageError = (e: Error) => problems.push(`pageerror: ${e.message}`);
+    page.on("console", onConsole);
+    page.on("pageerror", onPageError);
+    try {
+      await page.goto(path, { waitUntil: "networkidle" });
+    } finally {
+      page.off("console", onConsole);
+      page.off("pageerror", onPageError);
+    }
+    expect(problems, `${path} failed to hydrate cleanly`).toEqual([]);
+  }
+});
