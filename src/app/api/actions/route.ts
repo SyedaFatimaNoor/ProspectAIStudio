@@ -11,8 +11,12 @@ import {
 } from "@/lib/validation";
 import { CompatibleAI } from "@/lib/ai";
 import {
+  discoverySourceConfigured,
+  localSourceOnly,
+} from "@/lib/discovery";
+import {
+  cloudPauseBlocksDiscovery,
   pausedCloudWorkerMessage,
-  workerIsKnownPaused,
 } from "@/lib/cloud-worker";
 export const maxDuration = 90;
 export async function POST(req: NextRequest) {
@@ -100,7 +104,7 @@ export async function POST(req: NextRequest) {
     let result: unknown = { ok: true };
     switch (type) {
       case "create_job": {
-        if (!process.env.OVERPASS_URL)
+        if (!discoverySourceConfigured())
           return NextResponse.json(
             {
               error:
@@ -114,7 +118,10 @@ export async function POST(req: NextRequest) {
         const { data: worker, error: workerStatusError } = await db.rpc(
           "pa_cloud_worker_status",
         );
-        if (!workerStatusError && workerIsKnownPaused(worker))
+        if (
+          !workerStatusError &&
+          cloudPauseBlocksDiscovery(worker, localSourceOnly())
+        )
           return NextResponse.json(
             { error: pausedCloudWorkerMessage },
             { status: 409 },
@@ -159,7 +166,10 @@ export async function POST(req: NextRequest) {
           const { data: worker, error: workerStatusError } = await db.rpc(
             "pa_cloud_worker_status",
           );
-          if (!workerStatusError && workerIsKnownPaused(worker))
+          if (
+            !workerStatusError &&
+            cloudPauseBlocksDiscovery(worker, localSourceOnly())
+          )
             throw new Error(pausedCloudWorkerMessage);
         }
         if (status === "paused" && !["queued", "running"].includes(j.status))

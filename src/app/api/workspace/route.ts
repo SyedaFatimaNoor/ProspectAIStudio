@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/supabase";
 import { supabaseConfigured } from "@/lib/supabase-config";
 import { aiConfigured } from "@/lib/ai";
+import { discoverySourceConfigured, localSourceOnly } from "@/lib/discovery";
 import { emptyWorkspace, type Workspace } from "@/lib/types";
 export const dynamic = "force-dynamic";
 export async function GET() {
   const config: Workspace["config"] = {
     database: supabaseConfigured,
-    discovery: Boolean(process.env.OVERPASS_URL),
+    discovery: discoverySourceConfigured(),
     ai: aiConfigured(),
+    self_hosted_worker: localSourceOnly(),
   };
   try {
     const db = await serverSupabase();

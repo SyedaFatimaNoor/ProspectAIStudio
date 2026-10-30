@@ -36,7 +36,10 @@ import {
   discoveryBlockReason,
   discoveryJobErrorMessage,
 } from "@/lib/discovery-form";
-import { workerIsKnownPaused } from "@/lib/cloud-worker";
+import {
+  selfHostedWorkerMessage,
+  workerIsKnownPaused,
+} from "@/lib/cloud-worker";
 export default function Discovery() {
   const { data, loading, connectionError, action, notify, refresh } =
     useWorkspace();
@@ -71,6 +74,7 @@ export default function Discovery() {
   const errors = attempted ? validation.errors : {};
   const blockedReason = discoveryBlockReason(data, loading, connectionError);
   const workerPaused = workerIsKnownPaused(data.config.worker);
+  const selfHostedRunner = Boolean(data.config.self_hosted_worker);
   const set = (key: string, value: unknown) => {
     setForm((f) => ({ ...f, [key]: value }));
     setSubmissionError(null);
@@ -137,15 +141,21 @@ export default function Discovery() {
           Refresh jobs
         </Button>
       </PageHeading>
-      {workerPaused && (
-        <Notice tone="error">
-          Cloud discovery is paused, so new searches are blocked. The operator
-          must resolve the provider/setup issue before re-enabling the
-          scheduler. Existing queued jobs are shown as blocked below; no source
-          results are fabricated.{" "}
-          <Link href="/settings">View setup instructions</Link>.
-        </Notice>
-      )}
+      {workerPaused &&
+        (selfHostedRunner ? (
+          <Notice>
+            {selfHostedWorkerMessage}{" "}
+            <Link href="/settings">View setup instructions</Link>.
+          </Notice>
+        ) : (
+          <Notice tone="error">
+            Cloud discovery is paused, so new searches are blocked. The operator
+            must resolve the provider/setup issue before re-enabling the
+            scheduler. Existing queued jobs are shown as blocked below; no source
+            results are fabricated.{" "}
+            <Link href="/settings">View setup instructions</Link>.
+          </Notice>
+        ))}
       {data.config.worker?.enabled && (
         <Notice>
           Cloud discovery is enabled: one job attempt every{" "}
@@ -304,13 +314,20 @@ export default function Discovery() {
                 </small>
               </span>
               <Badge
-                tone={!data.config.discovery || workerPaused ? "amber" : "blue"}
+                tone={
+                  !data.config.discovery ||
+                  (workerPaused && !selfHostedRunner)
+                    ? "amber"
+                    : "blue"
+                }
               >
                 {!data.config.discovery
                   ? "Setup needed"
-                  : workerPaused
-                    ? "Worker paused"
-                    : "Source configured"}
+                  : workerPaused && selfHostedRunner
+                    ? "Local worker"
+                    : workerPaused
+                      ? "Worker paused"
+                      : "Source configured"}
               </Badge>
             </label>
             <p className="field-help">
@@ -466,7 +483,8 @@ export default function Discovery() {
         ) : (
           <div className="job-list">
             {data.jobs.map((j) => {
-              const jobBlocked = workerPaused && j.status === "queued";
+              const jobBlocked =
+                workerPaused && !selfHostedRunner && j.status === "queued";
               return (
                 <div className="job-card" key={j.id}>
                   <div className="job-row">
@@ -506,7 +524,7 @@ export default function Discovery() {
                             <Pause size={16} />
                           </Button>
                         )}
-                      {!workerPaused &&
+                      {!(workerPaused && !selfHostedRunner) &&
                         ["paused", "failed"].includes(j.status) && (
                           <Button
                             size="icon"

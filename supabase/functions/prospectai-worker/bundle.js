@@ -154,17 +154,7 @@ async function discoverOpenStreetMap(input, endpoint, signal) {
     const address = [t["addr:street"], t["addr:housenumber"]].filter(Boolean).join(" ");
     const coords = element.center || { lat: element.lat, lon: element.lon };
     const location = `${input.city}|${input.country}|${address || `${coords.lat?.toFixed(3)},${coords.lon?.toFixed(3)}`}`;
-    let website = t["contact:website"] || t.website || null;
-    if (website && !/^https?:\/\//i.test(website))
-      website = `https://${website}`;
-    if (website) {
-      try {
-        const w = new URL(website);
-        if (!["http:", "https:"].includes(w.protocol)) website = null;
-      } catch {
-        website = null;
-      }
-    }
+    const website = websiteOrNull(t["contact:website"] || t.website || null);
     rows.push({
       name: t.name.slice(0, 200),
       category: input.category,
@@ -189,6 +179,120 @@ async function discoverOpenStreetMap(input, endpoint, signal) {
     });
     if (rows.length >= input.max_results) break;
   }
+  return rows;
+}
+function websiteOrNull(value) {
+  let website = (value || "").slice(0, 300) || null;
+  if (website && !/^https?:\/\//i.test(website)) website = `https://${website}`;
+  if (!website) return null;
+  try {
+    const w = new URL(website);
+    return ["http:", "https:"].includes(w.protocol) ? website : null;
+  } catch {
+    return null;
+  }
+}
+function parseSnapshotRows(value) {
+  if (!Array.isArray(value) || value.length > 100)
+    throw new Error("Invalid snapshot response shape.");
+  const rows = [];
+  for (const raw of value) {
+    if (!object(raw)) throw new Error("Invalid snapshot row.");
+    const text = (key, max) => {
+      const v = raw[key];
+      if (v === null || v === void 0) return null;
+      if (typeof v !== "string" || v.length > max)
+        throw new Error("Invalid snapshot field.");
+      return v;
+    };
+    const num = (key) => {
+      const v = raw[key];
+      if (typeof v !== "number" || !Number.isFinite(v))
+        throw new Error("Invalid snapshot coordinate.");
+      return v;
+    };
+    const osmId = text("osm_type_id", 40);
+    const kind = /^node\/|way\/|relation\//.test(osmId || "") ? osmId.split("/")[0] : null;
+    const name = text("name", 200);
+    if (!kind || !name || !/^(node|way|relation)\/\d+$/.test(osmId))
+      throw new Error("Invalid snapshot identity.");
+    rows.push({
+      kind,
+      id: num("id"),
+      name,
+      phone: text("phone", 100),
+      email: text("email", 200),
+      website: text("website", 300),
+      street: text("street", 200),
+      housenumber: text("housenumber", 40),
+      locality: text("locality", 120),
+      lat: num("lat"),
+      lon: num("lon"),
+      edit_at: text("edit_at", 40),
+      snapshot_date: text("snapshot_date", 20) ?? "unknown",
+      distance_km: num("distance_km")
+    });
+  }
+  return rows;
+}
+async function discoverOsmSnapshot(input, rpc, signal) {
+  if (signal?.aborted) throw new Error("Search cancelled.");
+  if (!Object.hasOwn(categoryTag, input.category))
+    throw new Error(
+      `Category ${input.category} is not part of the loaded snapshot.`
+    );
+  const { data, error } = await rpc("pa_osm_search", {
+    p_country: input.country,
+    p_city: input.city,
+    p_category: input.category,
+    p_limit: 100
+  });
+  if (error)
+    throw new Error(`OpenStreetMap snapshot search failed: ${error.message}`);
+  const found = parseSnapshotRows(data);
+  if (found.length === 0)
+    throw new Error(
+      `The loaded OpenStreetMap snapshot has no ${input.category} listing for ${input.city}, ${input.country}. The city name may be spelled differently in OpenStreetMap, or the snapshot does not cover it. No live source was queried and no results were fabricated.`
+    );
+  const rows = [];
+  for (const row of found) {
+    if (input.keywords && !row.name.toLowerCase().includes(input.keywords.toLowerCase()))
+      continue;
+    if (input.requirements.public_contact && !row.phone && !row.email)
+      continue;
+    const address = [row.street, row.housenumber].filter(Boolean).join(" ");
+    const location = `${input.city}|${input.country}|${address || `${row.lat.toFixed(3)},${row.lon.toFixed(3)}`}`;
+    const website = websiteOrNull(row.website);
+    rows.push({
+      name: row.name,
+      category: input.category,
+      city: input.city,
+      country: input.country,
+      phone: row.phone,
+      email: row.email,
+      website,
+      source_id: `${row.kind}/${row.id}`,
+      source_url: `https://www.openstreetmap.org/${row.kind}/${row.id}`,
+      provider: "openstreetmap",
+      fingerprint: await sourceFingerprint(row.name, location),
+      facts: {
+        address: address || null,
+        coordinates: { lat: row.lat, lon: row.lon },
+        last_source_edit: row.edit_at,
+        attribution: "\xA9 OpenStreetMap contributors, ODbL",
+        observed_at: (/* @__PURE__ */ new Date()).toISOString(),
+        website_link: website,
+        source_format: `OpenStreetMap snapshot dated ${row.snapshot_date}`,
+        distance_km: row.distance_km,
+        activity_note: "Snapshot listing. Listing edits are not evidence of current business operation."
+      }
+    });
+    if (rows.length >= input.max_results) break;
+  }
+  if (rows.length === 0)
+    throw new Error(
+      `Reviewed ${found.length} ${input.category} snapshot listings around ${input.city} and none matched the filters${input.requirements.public_contact ? " (a public phone or email is required)" : ""}. Reported as failed rather than as an empty success.`
+    );
   return rows;
 }
 
@@ -267,15 +371,19 @@ function createWorkerHandler({ env, database, provider }) {
       return reply({ error: "Worker authentication is not configured" }, 503);
     if (!await validWorkerToken(expected, request.headers.get("x-worker-token")))
       return reply({ error: "Unauthorized" }, 401);
+    const snapshot = env.get("PA_OSM_SNAPSHOT") === "1";
     const endpoint = env.get("PA_OVERPASS_URL");
-    if (!endpoint) return reply({ error: "Provider is not configured" }, 503);
-    let url;
-    try {
-      url = new URL(endpoint);
-      if (url.protocol !== "https:" || url.username || url.password)
-        throw new Error("HTTPS required");
-    } catch {
-      return reply({ error: "Invalid configured provider URL" }, 503);
+    if (!snapshot && !endpoint)
+      return reply({ error: "Provider is not configured" }, 503);
+    let url = null;
+    if (!snapshot && endpoint) {
+      try {
+        url = new URL(endpoint);
+        if (url.protocol !== "https:" || url.username || url.password)
+          throw new Error("HTTPS required");
+      } catch {
+        return reply({ error: "Invalid configured provider URL" }, 503);
+      }
     }
     const deadline = AbortSignal.timeout(8e4);
     let db;
@@ -294,7 +402,11 @@ function createWorkerHandler({ env, database, provider }) {
       if (job.provider !== "openstreetmap")
         throw new Error("Unsupported discovery provider");
       const input = parseCloudSearch(job);
-      const rows = provider ? await provider.discover(input, deadline) : await discoverOpenStreetMap(input, url.toString(), deadline);
+      const rows = provider ? await provider.discover(input, deadline) : snapshot ? await discoverOsmSnapshot(
+        input,
+        (name, args) => db.rpc(name, args),
+        deadline
+      ) : await discoverOpenStreetMap(input, url.toString(), deadline);
       if (deadline.aborted) throw new Error("Worker deadline exceeded");
       const committed = await db.rpc("pa_cloud_commit", {
         p_job: job.id,

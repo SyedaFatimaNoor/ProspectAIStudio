@@ -1,4 +1,5 @@
 import {
+  discoverOsmSnapshot,
   discoverOpenStreetMap,
   parseCloudSearch,
 } from "../../../src/lib/discovery-core";
@@ -137,15 +138,19 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
       !(await validWorkerToken(expected, request.headers.get("x-worker-token")))
     )
       return reply({ error: "Unauthorized" }, 401);
+    const snapshot = env.get("PA_OSM_SNAPSHOT") === "1";
     const endpoint = env.get("PA_OVERPASS_URL");
-    if (!endpoint) return reply({ error: "Provider is not configured" }, 503);
-    let url: URL;
-    try {
-      url = new URL(endpoint);
-      if (url.protocol !== "https:" || url.username || url.password)
-        throw new Error("HTTPS required");
-    } catch {
-      return reply({ error: "Invalid configured provider URL" }, 503);
+    if (!snapshot && !endpoint)
+      return reply({ error: "Provider is not configured" }, 503);
+    let url: URL | null = null;
+    if (!snapshot && endpoint) {
+      try {
+        url = new URL(endpoint);
+        if (url.protocol !== "https:" || url.username || url.password)
+          throw new Error("HTTPS required");
+      } catch {
+        return reply({ error: "Invalid configured provider URL" }, 503);
+      }
     }
     const deadline = AbortSignal.timeout(80000);
     let db: Database;
@@ -167,7 +172,13 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
       const input = parseCloudSearch(job);
       const rows = provider
         ? await provider.discover(input, deadline)
-        : await discoverOpenStreetMap(input, url.toString(), deadline);
+        : snapshot
+          ? await discoverOsmSnapshot(
+              input,
+              (name, args) => db.rpc(name, args),
+              deadline,
+            )
+          : await discoverOpenStreetMap(input, url!.toString(), deadline);
       if (deadline.aborted) throw new Error("Worker deadline exceeded");
       const committed = await db.rpc("pa_cloud_commit", {
         p_job: job.id,

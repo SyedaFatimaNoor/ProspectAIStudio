@@ -13,6 +13,7 @@
     "worker": "tsx scripts/worker.ts",
     "format": "prettier --write src scripts tests *.ts *.json *.mjs *.md docs/*.md --ignore-unknown",
     "build:worker": "node scripts/build-cloud-worker.mjs",
+    "osm:snapshot": "tsx scripts/build-osm-snapshot.ts",
     "assets:brand": "node scripts/generate-brand-assets.mjs"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "lucide-react": "^0.468.0",
     "next": "^15.5.9",
     "ollama": "^0.6.4",
+    "osm-pbf-parser": "^2.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.3.1",

@@ -54,7 +54,7 @@ const integrations = [
       "Community-maintained business listings with source attribution. No paid API key required.",
     icon: Globe2,
     env: "OVERPASS_URL=https://overpass-api.de/api/interpreter",
-    help: "Set an authorised Overpass endpoint, review its usage policy, and start the separate worker. Small, bounded city queries only; respect ODbL attribution. Listings are not evidence of current operation.",
+    help: "Three free sources, and none of them needs a paid key. OSM_SNAPSHOT=1 searches an OpenStreetMap snapshot kept in the workspace database; build it once with npm run osm:snapshot -- --load, and it is the only source that also works on serverless hosting. OSM_EXTRACT_PATH reads a country .osm.pbf from download.geofabrik.de on disk and runs only in a locally started worker. OVERPASS_URL needs an endpoint that accepts your network. Respect ODbL attribution; listings are never evidence of current operation.",
     url: "https://wiki.openstreetmap.org/wiki/Overpass_API",
   },
   {
@@ -171,7 +171,9 @@ function integrationState(
       configured: true,
       configuration: "Source configuration detected",
       reachability: "Not tested — no provider request was made",
-      worker: "Paused — new discovery jobs are blocked",
+      worker: data.config.self_hosted_worker
+        ? "Hosted scheduler paused — a locally configured worker still runs queued jobs"
+        : "Paused — new discovery jobs are blocked",
       lastActivity: data.config.worker?.last_finished_at,
     };
   if (key === "discovery" && data.config.worker?.enabled)

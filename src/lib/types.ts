@@ -91,6 +91,7 @@ export type Workspace = {
     database: boolean;
     discovery: boolean;
     ai: boolean;
+    self_hosted_worker?: boolean;
     worker?: {
       enabled: boolean;
       mode: "listing-only";

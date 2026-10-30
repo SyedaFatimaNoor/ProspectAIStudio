@@ -26,6 +26,18 @@ The long-running Node worker remains available for DNS-pinned website HEAD check
 
 The migration's scheduler URL targets the application's existing Supabase project. Change it deliberately if deploying to another project.
 
+## Free snapshot source (no endpoint, no key, works on serverless)
+
+OpenStreetMap is an open database (ODbL), so a bounded country snapshot may be stored and re-served with attribution. This removes the Overpass dependency entirely: the search reads the workspace database, so there is no outbound provider request for an endpoint to reject, and no large file for a serverless runtime to carry.
+
+1. Apply `202610300001_osm_snapshot.sql` (`pa_osm_places`, `pa_osm_businesses`, `pa_osm_search`, load RPCs, `pa_osm_snapshot_status`).
+2. Download the country `.osm.pbf` from `https://download.geofabrik.de` into `.osm-cache/` (gitignored) and verify its published `.md5`.
+3. `npm run osm:snapshot -- --file=.osm-cache/<country>.osm.pbf --country=<country name as users type it>` builds and stores `.osm-cache/snapshot-<country>.json`. Add `--load` to upsert it through the service-role RPCs. The parse takes minutes and stays on the operator's machine; the key never leaves it.
+4. Set Edge Function secret `PA_OSM_SNAPSHOT=1` (replaces the `PA_OVERPASS_URL` requirement) and app/worker environment `OSM_SNAPSHOT=1`. Snapshot selection takes precedence over `OSM_EXTRACT_PATH`.
+5. Re-run `tests/osm-snapshot.sql`, then enable the singleton row (operator SQL below).
+
+A snapshot is a dated copy, so each result carries `source_format: OpenStreetMap snapshot dated <date>` and the job stays listing-only. Refresh it deliberately; `pa_osm_snapshot_status()` reports the snapshot date so an old copy cannot be mistaken for live data. City scoping is a place hierarchy (a city plus its smaller places within a rank-based radius), so a listing in one city cannot appear in another city's search.
+
 ## Operator commands (SQL editor; not browser-accessible)
 
 ```sql
@@ -53,6 +65,7 @@ A successful cron SQL execution only means the dispatcher ran. Inspect the job l
 
 - `npm test`: private-header guards, closed configuration, idle behavior, request-payload isolation, bounded failure path, no fabricated empty successes, commit errors, plus existing provider/security tests.
 - `tests/cloud-worker-security.sql`: transaction-only regression for ACLs, cap, global lease, stale/null tokens, bounds, partial-write rollback, dedup/provenance, tenant ownership, conservative confidence, replay, preservation of human assessments, cancellation and idle dispatch. **ROLLBACK** removes all fixtures and restores the original queue.
+- `tests/osm-snapshot.sql`: transaction-only regression for snapshot city scoping, limit clamping, unknown-city behaviour, and service-role-only loading. **ROLLBACK** leaves any loaded snapshot untouched.
 - `npm run build && npm run typecheck`; Playwright checks the application and cloud-mode notices with explicit fixtures. Local mocks are not proof of a real Overpass response; production job logs are reported separately.
 
 Official limits reviewed during implementation: [Edge runtime](https://supabase.com/docs/guides/functions/limits), [pricing and quotas](https://supabase.com/pricing). Free Edge wall-clock limit is currently 150 seconds and CPU time 2 seconds/request; recheck before changing batch sizes or adding CPU-heavy work. No guarantee of indefinite free operation is made.

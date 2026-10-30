@@ -1,4 +1,7 @@
-import { pausedCloudWorkerMessage, workerIsKnownPaused } from "./cloud-worker";
+import {
+  cloudPauseBlocksDiscovery,
+  pausedCloudWorkerMessage,
+} from "./cloud-worker";
 import { jobSchema } from "./validation";
 import type { Workspace } from "./types";
 
@@ -56,7 +59,8 @@ export function discoveryBlockReason(
     return "Database setup is required to save discovery jobs. View setup instructions in Settings.";
   if (!data.config.discovery)
     return "No discovery source is configured. Ask the operator to configure a permitted source in Settings. No search was run.";
-  if (workerIsKnownPaused(data.config.worker)) return pausedCloudWorkerMessage;
+  if (cloudPauseBlocksDiscovery(data.config.worker, Boolean(data.config.self_hosted_worker)))
+    return pausedCloudWorkerMessage;
   // A missing status is not proof that a separately configured worker is down.
   // Allow queuing, but explain the uncertainty instead of claiming live readiness.
   return null;

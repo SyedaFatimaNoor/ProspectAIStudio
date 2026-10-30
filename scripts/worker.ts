@@ -22,6 +22,19 @@ if (!url || !key) {
 const db = createClient(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+// Claiming is scoped to one account on purpose. The pa_claim_job() RPC is a
+// security-definer function that returns the oldest eligible job in the whole
+// database, so running this locally with the service key would process other
+// people's production jobs and spend their retry budget.
+const claimUser = process.argv
+  .find((a) => a.startsWith("--user="))
+  ?.slice("--user=".length);
+if (!claimUser || !/^[0-9a-f-]{36}$/i.test(claimUser)) {
+  console.error(
+    "Worker requires --user=<uuid> and only claims that account's jobs. An unscoped worker would run other users' production jobs. Usage: npm run worker -- --user=<uuid>",
+  );
+  process.exit(1);
+}
 let stopping = false;
 const controller = new AbortController();
 process.on("SIGTERM", () => {
@@ -37,16 +50,31 @@ function log(event: string, detail: Record<string, unknown> = {}) {
     JSON.stringify({ timestamp: new Date().toISOString(), event, ...detail }),
   );
 }
+// A country-wide extract parse costs minutes, and a dropped uplink response must
+// not throw that work away. Builders re-issue their request when awaited again.
+const transientNetwork =
+  /fetch failed|Connect Timeout|ECONNRESET|ETIMEDOUT|socket hang up|UND_ERR/i;
 async function must<T extends { error: unknown }>(operation: PromiseLike<T>) {
-  const r = await operation;
-  if (r.error)
-    throw new Error(
-      (r.error as { message?: string }).message || "Database operation failed.",
-    );
-  return r;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const r = await operation;
+      if (r.error)
+        throw new Error(
+          (r.error as { message?: string }).message ||
+            "Database operation failed.",
+        );
+      return r;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (attempt >= 3 || !transientNetwork.test(message)) throw e;
+      await delay(1200 * attempt);
+    }
+  }
 }
-async function discovery() {
-  await must(
+// A country-wide .osm.pbf scan can outlast the two-minute lease meant for HTTP
+// sources; an expired lease lets the sweep re-claim the same job and re-parse it.
+const discoveryLeaseMs = process.env.OSM_EXTRACT_PATH ? 900000 : 120000;
+async function discovery() {  await must(
     db
       .from("pa_discovery_jobs")
       .update({
@@ -56,11 +84,43 @@ async function discovery() {
         lease_until: null,
       })
       .eq("status", "running")
+      .eq("user_id", claimUser)
       .gte("attempts", 3)
       .lt("lease_until", new Date().toISOString()),
   );
-  const { data } = await must(db.rpc("pa_claim_job"));
-  const job = data?.[0];
+  const { data: candidates } = await must(
+    db
+      .from("pa_discovery_jobs")
+      .select("*")
+      .eq("user_id", claimUser)
+      .or(
+        `status.eq.queued,and(status.eq.running,lease_until.lt.${new Date().toISOString()})`,
+      )
+      .lt("attempts", 3)
+      .lte("next_retry_at", new Date().toISOString())
+      .order("created_at")
+      .limit(1),
+  );
+  const found = candidates?.[0];
+  if (!found) return false;
+  // Compare-and-swap, matching the verification claim below: these guards
+  // re-check what we just read, so if the cloud tick took the row first this
+  // update matches nothing and we yield instead of double-processing a job.
+  const { data: job } = await must(
+    db
+      .from("pa_discovery_jobs")
+      .update({
+        status: "running",
+        attempts: found.attempts + 1,
+        lease_until: new Date(Date.now() + discoveryLeaseMs).toISOString(),
+      })
+      .eq("id", found.id)
+      .eq("user_id", claimUser)
+      .eq("status", found.status)
+      .eq("attempts", found.attempts)
+      .select()
+      .maybeSingle(),
+  );
   if (!job) return false;
   const logs: string[] = job.logs || [];
   const add = (text: string) => {
@@ -68,7 +128,9 @@ async function discovery() {
     log("discovery", { job: job.id, message: text });
   };
   try {
-    add("Claimed a two-minute lease. Querying configured public source.");
+    add(
+      `Claimed a ${discoveryLeaseMs / 60000}-minute lease. Querying configured public source.`,
+    );
     await must(db.from("pa_discovery_jobs").update({ logs }).eq("id", job.id));
     const rows = await getProvider(job.provider).discover(
       jobSchema.parse(job),
@@ -107,42 +169,56 @@ async function discovery() {
       }
       let record = known.find((b) => isDuplicate(row, b));
       if (!record) {
-        const inserted = await db
-          .from("pa_businesses")
-          .upsert(
-            { ...row, user_id: job.user_id, job_id: job.id },
-            {
-              onConflict: "user_id,provider,source_id",
-              ignoreDuplicates: true,
-            },
-          )
-          .select()
-          .maybeSingle();
-        if (inserted.error && inserted.error.code !== "23505")
-          throw inserted.error;
-        if (inserted.data) record = inserted.data;
-        else {
-          const { data: collision } = await must(
+        // A dropped uplink response surfaces as an error object without a code,
+        // so retry it; a unique violation is resolved by the lookups below.
+        for (let attempt = 1; ; attempt++) {
+          const inserted = await db
+            .from("pa_businesses")
+            .upsert(
+              { ...row, user_id: job.user_id, job_id: job.id },
+              {
+                onConflict: "user_id,provider,source_id",
+                ignoreDuplicates: true,
+              },
+            )
+            .select()
+            .maybeSingle();
+          if (!inserted.error) {
+            if (inserted.data) record = inserted.data;
+            break;
+          }
+          if (inserted.error.code === "23505") break;
+          const message = `${
+            (inserted.error as { message?: string }).message || "Insert failed"
+          }${inserted.error.code ? ` (${inserted.error.code})` : ""}`;
+          if (attempt < 3 && transientNetwork.test(message)) {
+            await delay(1200 * attempt);
+            continue;
+          }
+          throw new Error(`Saving ${row.name} failed: ${message}`);
+        }
+      }
+      if (!record) {
+        const { data: collision } = await must(
+          db
+            .from("pa_businesses")
+            .select("*")
+            .eq("user_id", job.user_id)
+            .eq("fingerprint", row.fingerprint)
+            .maybeSingle(),
+        );
+        record = collision || undefined;
+        if (!record) {
+          const { data: sameSource } = await must(
             db
               .from("pa_businesses")
               .select("*")
               .eq("user_id", job.user_id)
-              .eq("fingerprint", row.fingerprint)
+              .eq("provider", row.provider)
+              .eq("source_id", row.source_id)
               .maybeSingle(),
           );
-          record = collision || undefined;
-          if (!record) {
-            const { data: sameSource } = await must(
-              db
-                .from("pa_businesses")
-                .select("*")
-                .eq("user_id", job.user_id)
-                .eq("provider", row.provider)
-                .eq("source_id", row.source_id)
-                .maybeSingle(),
-            );
-            record = sameSource || undefined;
-          }
+          record = sameSource || undefined;
         }
         if (record) known.push(record);
       }
@@ -171,11 +247,24 @@ async function discovery() {
               .eq("business_id", record.id),
           );
           if (!count) {
-            const queued = await db
-              .from("pa_verification_runs")
-              .insert({ business_id: record.id, user_id: job.user_id });
-            if (queued.error && queued.error.code !== "23505")
-              throw queued.error;
+            for (let attempt = 1; ; attempt++) {
+              const queued = await db
+                .from("pa_verification_runs")
+                .insert({ business_id: record.id, user_id: job.user_id });
+              if (!queued.error) break;
+              if (queued.error.code === "23505") break;
+              const message = `${
+                (queued.error as { message?: string }).message ||
+                "Queueing website review failed"
+              }${queued.error.code ? ` (${queued.error.code})` : ""}`;
+              if (attempt < 3 && transientNetwork.test(message)) {
+                await delay(1200 * attempt);
+                continue;
+              }
+              throw new Error(
+                `Queueing website review for ${row.name} failed: ${message}`,
+              );
+            }
           }
         }
       }
@@ -186,7 +275,7 @@ async function discovery() {
           .update({
             processed,
             logs,
-            lease_until: new Date(Date.now() + 120000).toISOString(),
+            lease_until: new Date(Date.now() + discoveryLeaseMs).toISOString(),
           })
           .eq("id", job.id)
           .eq("status", "running"),
@@ -237,6 +326,7 @@ async function verification() {
         lease_until: null,
       })
       .eq("status", "running")
+      .eq("user_id", claimUser)
       .gte("attempts", 3)
       .lt("lease_until", new Date().toISOString()),
   );
@@ -244,6 +334,7 @@ async function verification() {
     db
       .from("pa_verification_runs")
       .select("*")
+      .eq("user_id", claimUser)
       .or(
         `status.eq.queued,and(status.eq.running,lease_until.lt.${new Date().toISOString()})`,
       )
