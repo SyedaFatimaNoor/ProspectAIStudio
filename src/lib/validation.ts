@@ -34,6 +34,18 @@ export const jobSchema = z.object({
     website_review: z.boolean(),
   }),
 });
+// Display names are plain text rendered by React (never HTML). Permit ordinary
+// international names and punctuation such as & or quotes, but reject invisible
+// control characters and give the user a clear, shared client/server rule.
+export const displayNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Please enter a display name.")
+  .max(80, "Use 80 characters or fewer for your display name.")
+  .refine(
+    (value) => !/[\u0000-\u001F\u007F]/.test(value),
+    "Use visible characters only in your display name.",
+  );
 export const idSchema = z.string().uuid();
 export const proposalSchema = z.object({
   id: idSchema.optional(),

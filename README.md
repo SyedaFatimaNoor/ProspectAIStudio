@@ -4,6 +4,8 @@ A premium, evidence-first business research workspace built with Next.js App Rou
 
 **No fake leads or metrics are seeded.** The public homepage's fictional examples are labelled. Unauthenticated workspace pages are read-only previews; data and mutations require Supabase authentication. Discovery reports actual provider responses, not generated businesses.
 
+For an audit-by-audit implementation record, current blockers, and operator-only prerequisites, see [the audit remediation register](docs/AUDIT_REMEDIATION.md). It does not mark a blocked external action as complete.
+
 ## Quick start
 
 Requires **Node.js 22+** and npm.
@@ -96,6 +98,8 @@ node --env-file=.env --import tsx scripts/test-ollama.ts
 ```
 
 The command prints only the real provider reply. It is not an application health check and should not be run from browser code.
+
+A signed-in operator can instead use **Settings → Integrations → Test AI connection**. The server sends a short fixed connectivity prompt with no lead/contact data and shows only an actual bounded reply, model, and latency. Health metadata (not the reply) is audited. It is rate-limited to three checks per five minutes in one application runtime; production verification still requires an operator to run it with a configured key. The compatible fallback uses `AI_BASE_URL`, `AI_MODEL`, and the optional server-only `AI_API_KEY`; choose only a provider whose terms permit the workload.
 
 See [provider documentation](docs/PROVIDERS.md) for data restrictions, verification scoring, failure handling, AI boundaries, and messaging requirements.
 

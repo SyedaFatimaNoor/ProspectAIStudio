@@ -17,6 +17,8 @@ const start = (page: Page) =>
   page.getByRole("button", { name: "Start discovery", exact: true });
 const city = (page: Page) =>
   page.getByRole("textbox", { name: "City", exact: true });
+const country = (page: Page) =>
+  page.getByRole("textbox", { name: "Country", exact: true });
 const maximum = (page: Page) =>
   page.getByRole("spinbutton", { name: "Maximum results" });
 
@@ -47,6 +49,7 @@ test("discovery gives inline field errors, correct descriptions and first-invali
     return r.fulfill({ json: { ok: true } });
   });
   await page.goto("/discovery");
+  await country(page).fill("Pakistan");
   await expect(city(page)).not.toHaveAttribute("aria-invalid", "true");
   await start(page).click();
   await expect(city(page)).toBeFocused();
@@ -96,6 +99,7 @@ test("configured result limits, empty/decimal/out-of-range values, trimmed paylo
     await route.fulfill({ json: { ok: true } });
   });
   await page.goto("/discovery");
+  await country(page).fill("Pakistan");
   await expect(maximum(page)).toHaveValue("8");
   await expect(maximum(page)).toHaveAttribute("max", "8");
   await city(page).fill(" Karachi ");
@@ -157,6 +161,7 @@ for (const mode of ["preview", "source-missing", "paused"] as const) {
     await expect(page.getByText("Loading workspace requirements…")).toHaveCount(
       0,
     );
+    await country(page).fill("Pakistan");
     await city(page).fill("Karachi");
     await expect(start(page)).toBeDisabled();
     await expect(start(page)).toHaveAttribute(
@@ -297,6 +302,7 @@ test("server rejection stays inline, preserves input and permits an explicit ret
     await route.fulfill({ json: { ok: true } });
   });
   await page.goto("/discovery");
+  await country(page).fill("Pakistan");
   await city(page).fill("Karachi");
   await start(page).click();
   await expect(page.getByRole("main").getByRole("alert")).toContainText(
@@ -427,6 +433,7 @@ test("failed refresh preserves the last account/form but prevents a stale discov
   await expect(page.locator(".workspace-switch small")).toHaveText(
     "Personal workspace",
   );
+  await country(page).fill("Pakistan");
   await city(page).fill("Karachi");
   await page.route("**/api/workspace", (route) =>
     route.fulfill({

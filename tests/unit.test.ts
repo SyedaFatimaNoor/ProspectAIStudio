@@ -15,10 +15,12 @@ import {
   messageSchema,
   settingsSchema,
   manualSchema,
+  displayNameSchema,
 } from "../src/lib/validation";
 import { factBasedConcept } from "../src/lib/proposal";
 import { csvCell } from "../src/lib/utils";
 import { aiConfigured, CompatibleAI } from "../src/lib/ai";
+import { takeStoredAuthAttempt } from "../src/lib/auth-attempt-limiter";
 import type { Business } from "../src/lib/types";
 const business = {
   id: "bf4941be-e03a-454b-905c-ae57c247e8e3",
@@ -265,6 +267,37 @@ test("settings enforce retention and confidence boundaries", () => {
     false,
   );
 });
+test("browser auth attempt guard is bounded and stores no account data", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) || null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  };
+  const options = { limit: 2, windowMs: 60_000 };
+  assert.deepEqual(takeStoredAuthAttempt(storage, "credentials", options, 1_000), {
+    allowed: true,
+  });
+  assert.deepEqual(takeStoredAuthAttempt(storage, "credentials", options, 2_000), {
+    allowed: true,
+  });
+  const blocked = takeStoredAuthAttempt(storage, "credentials", options, 3_000);
+  assert.equal(blocked.allowed, false);
+  if (!blocked.allowed) assert.equal(blocked.retryAfterSeconds, 58);
+  assert.doesNotMatch([...values.values()].join(""), /@|password|token/i);
+  assert.deepEqual(takeStoredAuthAttempt(storage, "credentials", options, 62_000), {
+    allowed: true,
+  });
+});
+
+test("display names allow ordinary punctuation with clear validation", () => {
+  assert.equal(displayNameSchema.safeParse('Noor & Co. "Studio"').success, true);
+  assert.equal(displayNameSchema.safeParse("نور فاطمہ").success, true);
+  const invalid = displayNameSchema.safeParse("Name\u0000");
+  assert.equal(invalid.success, false);
+  if (!invalid.success)
+    assert.match(invalid.error.issues[0]?.message || "", /visible characters/);
+});
+
 test("manual evidence rejects short reasoning and non-http source URLs", () => {
   const m = {
     business_id: business.id,
@@ -363,6 +396,59 @@ test("Ollama Cloud uses a dedicated server key and native bounded chat request",
     assert.equal(request.stream, false);
     assert.equal(request.options.temperature, 0.4);
     assert.equal(request.options.num_predict, 2200);
+  } finally {
+    if (old.ollama) process.env.OLLAMA_API_KEY = old.ollama;
+    else delete process.env.OLLAMA_API_KEY;
+    if (old.base) process.env.AI_BASE_URL = old.base;
+    else delete process.env.AI_BASE_URL;
+    if (old.model) process.env.AI_MODEL = old.model;
+    else delete process.env.AI_MODEL;
+    globalThis.fetch = old.fetch;
+  }
+});
+
+test("AI health check returns only a real bounded provider reply", async () => {
+  const old = {
+    ollama: process.env.OLLAMA_API_KEY,
+    base: process.env.AI_BASE_URL,
+    model: process.env.AI_MODEL,
+    fetch: globalThis.fetch,
+  };
+  const captured: { requestBody?: Record<string, unknown> } = {};
+  process.env.OLLAMA_API_KEY = "test-only-ollama-key";
+  delete process.env.AI_BASE_URL;
+  delete process.env.AI_MODEL;
+  globalThis.fetch = (async (_input, request) => {
+    captured.requestBody = JSON.parse(String(request?.body));
+    return new Response(
+      JSON.stringify({
+        model: "gemma4:31b",
+        message: {
+          role: "assistant",
+          content: "ProspectAI AI connection verified.",
+        },
+        done: true,
+      }),
+      { headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+  try {
+    const health = await new CompatibleAI().healthCheck();
+    assert.equal(health.provider, "Ollama Cloud");
+    assert.equal(health.model, "gemma4:31b");
+    assert.equal(health.reply, "ProspectAI AI connection verified.");
+    assert.ok(health.latencyMs >= 0);
+    const requestBody = captured.requestBody;
+    assert.equal(requestBody?.model, "gemma4:31b");
+    assert.equal(requestBody?.stream, false);
+    assert.equal(
+      (requestBody?.options as { num_predict?: number }).num_predict,
+      24,
+    );
+    assert.equal(
+      (requestBody?.messages as { content: string }[])[1].content,
+      "Reply with exactly: ProspectAI AI connection verified.",
+    );
   } finally {
     if (old.ollama) process.env.OLLAMA_API_KEY = old.ollama;
     else delete process.env.OLLAMA_API_KEY;

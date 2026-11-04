@@ -52,6 +52,13 @@ export async function GET(req: NextRequest) {
       "pa_cloud_worker_status",
     );
     if (!workerError && worker) config.worker = worker;
+    // Optional snapshot status is aggregate-only and available to authenticated
+    // operators. A missing migration is intentionally non-fatal for existing
+    // deployments; it must never make an empty snapshot look ready.
+    const { data: snapshot, error: snapshotError } = await db.rpc(
+      "pa_osm_snapshot_status",
+    );
+    if (!snapshotError && snapshot) config.snapshot = snapshot;
     const tables = {
       businesses: "businesses",
       jobs: "discovery_jobs",
