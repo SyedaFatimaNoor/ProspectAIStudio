@@ -558,7 +558,7 @@ export function Landing() {
           <Link href="/privacy">Privacy &amp; data handling</Link>
           <Link href="/responsible-use">Responsible use</Link>
           <a href="#faq">FAQs</a>
-          <Link href="/settings">Integrations</Link>
+          <Link href="/settings">Settings & integrations</Link>
           <Link href="/sign-in">
             Sign in <ArrowUpRight size={13} />
           </Link>

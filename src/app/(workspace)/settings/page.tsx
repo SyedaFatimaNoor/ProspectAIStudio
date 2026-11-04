@@ -33,6 +33,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { browserSupabase } from "@/lib/browser-supabase";
 import { workerIsKnownPaused } from "@/lib/cloud-worker";
+import { displayNameSchema } from "@/lib/validation";
+import type { AIHealth } from "@/lib/ai";
 import type { Workspace } from "@/lib/types";
 const integrations = [
   {
@@ -99,8 +101,27 @@ type IntegrationState = {
   configuration: string;
   reachability: string;
   worker?: string;
+  quota?: string;
+  snapshot?: string;
   lastActivity?: string | null;
+  lastError?: string | null;
 };
+
+function workerQuota(data: Workspace) {
+  const worker = data.config.worker;
+  if (!worker) return undefined;
+  const remaining =
+    worker.daily_remaining ?? Math.max(worker.daily_limit - worker.daily_attempts, 0);
+  return `${worker.daily_attempts}/${worker.daily_limit} used today (UTC); ${remaining} remaining`;
+}
+
+function snapshotState(data: Workspace) {
+  const snapshot = data.config.snapshot;
+  if (!snapshot) return "Unavailable — snapshot migration is not installed";
+  if (!snapshot.businesses || !snapshot.places)
+    return "Installed but empty — load a lawful, attributed OSM extract before enabling it";
+  return `${snapshot.businesses.toLocaleString()} businesses · ${snapshot.places.toLocaleString()} places · newest ${snapshot.newest_snapshot || "unknown"}`;
+}
 
 function integrationState(
   key: string,
@@ -147,6 +168,9 @@ function integrationState(
       configured: false,
       configuration: "Required server configuration is missing",
       reachability: "Not tested",
+      ...(key === "discovery" && data.user
+        ? { snapshot: snapshotState(data) }
+        : {}),
     };
   if (!data.user)
     return {
@@ -174,7 +198,10 @@ function integrationState(
       worker: data.config.self_hosted_worker
         ? "Hosted scheduler paused — a locally configured worker still runs queued jobs"
         : "Paused — new discovery jobs are blocked",
+      snapshot: snapshotState(data),
+      quota: workerQuota(data),
       lastActivity: data.config.worker?.last_finished_at,
+      lastError: data.config.worker?.last_error,
     };
   if (key === "discovery" && data.config.worker?.enabled)
     return {
@@ -184,7 +211,10 @@ function integrationState(
       configuration: "Source configuration detected",
       reachability: "Not tested — configuration is not a provider health check",
       worker: "Scheduled",
+      snapshot: snapshotState(data),
+      quota: workerQuota(data),
       lastActivity: data.config.worker.last_finished_at,
+      lastError: data.config.worker.last_error,
     };
   return {
     label:
@@ -195,7 +225,15 @@ function integrationState(
     configured: true,
     configuration: "Configured for this workspace",
     reachability: "Not tested — configuration is not a provider health check",
-    ...(key === "discovery" ? { worker: "Status unconfirmed" } : {}),
+    ...(key === "discovery"
+      ? {
+          worker: "Status unconfirmed",
+          snapshot: snapshotState(data),
+          quota: workerQuota(data),
+          lastActivity: data.config.worker?.last_finished_at,
+          lastError: data.config.worker?.last_error,
+        }
+      : {}),
   };
 }
 
@@ -208,7 +246,10 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [checkingAi, setCheckingAi] = useState(false);
+  const [aiHealth, setAiHealth] = useState<AIHealth | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const displayNameValidation = displayNameSchema.safeParse(displayName);
   useEffect(() => {
     setDisplayName(data.user?.display_name || "");
   }, [data.user?.display_name]);
@@ -240,6 +281,21 @@ export default function Settings() {
         : "Unable to refresh workspace status. Check the connection and try again.",
     );
     setCheckingStatus(false);
+  }
+  async function testAiConnection() {
+    setCheckingAi(true);
+    setAiHealth(null);
+    try {
+      const health = (await action("test_ai", {})) as AIHealth;
+      if (!health.reply || !health.provider || !health.model)
+        throw new Error("AI provider returned an incomplete health response.");
+      setAiHealth(health);
+      notify(`AI connection verified in ${health.latencyMs} ms.`);
+    } catch {
+      // WorkspaceProvider already presents the server's controlled error.
+    } finally {
+      setCheckingAi(false);
+    }
   }
   return (
     <>
@@ -326,6 +382,18 @@ export default function Settings() {
                         <dd>{status.worker}</dd>
                       </div>
                     )}
+                    {status.snapshot && (
+                      <div>
+                        <dt>OSM snapshot</dt>
+                        <dd>{status.snapshot}</dd>
+                      </div>
+                    )}
+                    {status.quota && (
+                      <div>
+                        <dt>Daily worker quota</dt>
+                        <dd>{status.quota}</dd>
+                      </div>
+                    )}
                     {status.lastActivity && (
                       <div>
                         <dt>Last worker activity</dt>
@@ -334,7 +402,35 @@ export default function Settings() {
                         </dd>
                       </div>
                     )}
+                    {status.lastError && (
+                      <div>
+                        <dt>Last worker outcome</dt>
+                        <dd>{status.lastError}</dd>
+                      </div>
+                    )}
                   </dl>
+                  {i.key === "ai" && status.configured && data.user && (
+                    <div className="integration-health">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={checkingAi}
+                        onClick={() => void testAiConnection()}
+                      >
+                        {checkingAi ? <Spinner /> : <Sparkles size={14} />}
+                        {checkingAi ? "Testing AI…" : "Test AI connection"}
+                      </Button>
+                      {aiHealth && (
+                        <div className="integration-health-result" role="status">
+                          <strong>
+                            Actual reply · {aiHealth.provider} · {aiHealth.model} ·{" "}
+                            {aiHealth.latencyMs} ms
+                          </strong>
+                          <p>{aiHealth.reply}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     className="integration-configure"
                     onClick={() => setDetail(i.key)}
@@ -472,7 +568,17 @@ export default function Settings() {
               <Field label="Email address">
                 <input readOnly value={data.user?.email || "Not signed in"} />
               </Field>
-              <Field label="Display name">
+              <Field
+                label="Display name"
+                error={
+                  displayName
+                    ? displayNameValidation.success
+                      ? undefined
+                      : displayNameValidation.error.issues[0]?.message
+                    : undefined
+                }
+                hint="Up to 80 visible characters. Names may include international letters and punctuation."
+              >
                 <input
                   maxLength={80}
                   value={displayName}
@@ -481,7 +587,7 @@ export default function Settings() {
                 />
               </Field>
               <Button
-                disabled={!displayName.trim()}
+                disabled={!displayNameValidation.success}
                 onClick={async () => {
                   try {
                     await action("save_profile", { display_name: displayName });

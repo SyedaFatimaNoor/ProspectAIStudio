@@ -45,7 +45,8 @@ export default function Discovery() {
     useWorkspace();
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
-    country: "Pakistan",
+    // A global workspace must not silently scope every new search to one country.
+    country: "",
     city: "",
     category: "cafe",
     keywords: "",
@@ -403,7 +404,11 @@ export default function Discovery() {
             </div>
             {blockedReason && (
               <p
-                className="form-submit-help"
+                className={
+                  workerPaused || !data.config.discovery
+                    ? "sr-only"
+                    : "form-submit-help"
+                }
                 id="discovery-unavailable"
                 role="status"
               >

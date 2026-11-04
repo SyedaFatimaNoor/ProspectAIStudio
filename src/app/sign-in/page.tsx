@@ -11,6 +11,7 @@ import {
   LockKeyhole,
 } from "lucide-react";
 import { browserSupabase } from "@/lib/browser-supabase";
+import { takeBrowserAuthAttempt } from "@/lib/auth-attempt-limiter";
 import { Button } from "@/components/ui/button";
 import { Field, Notice, Spinner } from "@/components/shared";
 export default function SignIn() {
@@ -37,6 +38,14 @@ export default function SignIn() {
       if (!db)
         throw new Error(
           "Authentication is not configured. Add the public Supabase URL and publishable key on the server.",
+        );
+      const attempt = takeBrowserAuthAttempt("credentials", {
+        limit: 5,
+        windowMs: 5 * 60_000,
+      });
+      if (!attempt.allowed)
+        throw new Error(
+          `Too many sign-in or sign-up attempts from this browser. Please wait ${attempt.retryAfterSeconds} seconds before trying again.`,
         );
       if (mode === "signup") {
         const { data, error } = await db.auth.signUp({

@@ -118,6 +118,16 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
           json: { error: "Sending is disabled." },
         });
         return;
+      case "test_ai":
+        await route.fulfill({
+          json: {
+            provider: "TEST ONLY — Ollama Cloud",
+            model: "gemma4:31b",
+            latencyMs: 42,
+            reply: "TEST ONLY — actual provider fixture reply.",
+          },
+        });
+        return;
     }
     await route.fulfill({ json: { ok: true } });
   });
@@ -182,10 +192,32 @@ test("sign in exposes accessible account recovery and explains an expired callba
   await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Send reset instructions" })).toBeVisible();
 });
+test("AI settings health check shows only a returned provider reply", async ({
+  page,
+}) => {
+  await mocked(page, {
+    config: { database: true, discovery: true, ai: true },
+  });
+  await page.goto("/settings");
+  await page
+    .getByRole("button", { name: "Test AI connection", exact: true })
+    .click();
+  await expect(page.locator(".toast[role='status']")).toContainText(
+    "AI connection verified in 42 ms",
+  );
+  const card = page
+    .locator(".integration-card")
+    .filter({ has: page.getByRole("heading", { name: "Your AI provider" }) });
+  await expect(card).toContainText("Actual reply");
+  await expect(card).toContainText("gemma4:31b");
+  await expect(card).toContainText("TEST ONLY — actual provider fixture reply.");
+});
+
 test("real unconfigured discovery is disabled and never reports success", async ({
   page,
 }) => {
   await page.goto("/discovery");
+  await page.getByLabel("Country", { exact: true }).fill("Pakistan");
   await page.getByLabel("City", { exact: true }).fill("Karachi");
   const start = page.getByRole("button", {
     name: "Start discovery",
@@ -204,6 +236,7 @@ test("starting a discovery queues a job and shows source logs (test provider fix
 }) => {
   await mocked(page);
   await page.goto("/discovery");
+  await page.getByLabel("Country", { exact: true }).fill("Pakistan");
   await page.getByLabel("City", { exact: true }).fill("Test City");
   await page
     .getByRole("button", { name: "Start discovery", exact: true })

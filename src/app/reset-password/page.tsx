@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, KeyRound, LockKeyhole, Mail } from "lucide-react";
 import { browserSupabase } from "@/lib/browser-supabase";
+import { takeBrowserAuthAttempt } from "@/lib/auth-attempt-limiter";
 import { Button } from "@/components/ui/button";
 import { Field, Notice, Spinner } from "@/components/shared";
 
@@ -36,6 +37,14 @@ export default function ResetPassword() {
       if (!db)
         throw new Error(
           "Authentication is not configured. Add the public Supabase URL and publishable key on the server.",
+        );
+      const attempt = takeBrowserAuthAttempt("password-reset", {
+        limit: 3,
+        windowMs: 10 * 60_000,
+      });
+      if (!attempt.allowed)
+        throw new Error(
+          `Too many password-reset requests from this browser. Please wait ${attempt.retryAfterSeconds} seconds before trying again.`,
         );
       const callback = new URL("/auth/callback", window.location.origin);
       callback.searchParams.set("next", "/reset-password");
@@ -70,6 +79,14 @@ export default function ResetPassword() {
       if (password !== confirmation) throw new Error("The passwords do not match.");
       const db = browserSupabase();
       if (!db) throw new Error("Authentication is not configured.");
+      const attempt = takeBrowserAuthAttempt("password-update", {
+        limit: 5,
+        windowMs: 5 * 60_000,
+      });
+      if (!attempt.allowed)
+        throw new Error(
+          `Too many password-update attempts from this browser. Please wait ${attempt.retryAfterSeconds} seconds before trying again.`,
+        );
       const { error: updateError } = await db.auth.updateUser({ password });
       if (updateError) throw updateError;
       await db.auth.signOut();

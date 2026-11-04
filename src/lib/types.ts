@@ -92,14 +92,22 @@ export type Workspace = {
     discovery: boolean;
     ai: boolean;
     self_hosted_worker?: boolean;
+    snapshot?: {
+      businesses: number;
+      places: number;
+      oldest_snapshot: string | null;
+      newest_snapshot: string | null;
+    };
     worker?: {
       enabled: boolean;
       mode: "listing-only";
       daily_limit: number;
       daily_attempts: number;
+      daily_remaining?: number;
       interval_minutes: number;
       last_started_at: string | null;
       last_finished_at: string | null;
+      last_error?: string | null;
     };
   };
   windowed?: boolean;

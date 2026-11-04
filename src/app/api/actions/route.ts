@@ -8,6 +8,7 @@ import {
   messageSchema,
   settingsSchema,
   manualSchema,
+  displayNameSchema,
 } from "@/lib/validation";
 import { CompatibleAI } from "@/lib/ai";
 import {
@@ -75,6 +76,20 @@ export async function POST(req: NextRequest) {
       .object({ type: z.string().trim().min(1) })
       .parse(input).type;
     const user_id = user.id;
+    if (type === "test_ai") {
+      const aiRate = takeRateLimit(`ai-health:${user_id}`, {
+        limit: 3,
+        windowMs: 5 * 60_000,
+      });
+      if (!aiRate.allowed)
+        return NextResponse.json(
+          {
+            error:
+              "AI connection tests are limited to 3 per 5 minutes. Please wait before retrying.",
+          },
+          { status: 429, headers: rateLimitHeaders(aiRate) },
+        );
+    }
     async function insert(table: string, values: Record<string, unknown>) {
       const r = await db!
         .from(`pa_${table}`)
@@ -370,6 +385,18 @@ export async function POST(req: NextRequest) {
         await audit(b.id);
         break;
       }
+      case "test_ai": {
+        const health = await new CompatibleAI().healthCheck();
+        // Keep the model response out of the audit log. It is shown only to the
+        // requesting signed-in operator and is not business evidence.
+        await audit(null, {
+          provider: health.provider,
+          model: health.model,
+          latency_ms: health.latencyMs,
+        });
+        result = health;
+        break;
+      }
       case "save_message": {
         const v = messageSchema.parse(input);
         await owned("businesses", v.business_id);
@@ -479,12 +506,7 @@ export async function POST(req: NextRequest) {
         break;
       }
       case "save_profile": {
-        const display_name = z
-          .string()
-          .trim()
-          .min(1)
-          .max(80)
-          .parse(input.display_name);
+        const display_name = displayNameSchema.parse(input.display_name);
         const { error } = await db
           .from("pa_profiles")
           .upsert({ id: user_id, display_name });

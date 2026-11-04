@@ -33,7 +33,10 @@ const securityHeaders = [
 const config: NextConfig = {
   poweredByHeader: false,
   devIndicators: false,
-  allowedDevOrigins: ["*.e2b.app"],
+  // Playwright uses 127.0.0.1 while the dev server can resolve HMR assets via
+  // localhost; the hosted preview uses its proxied e2b hostname. Keep this
+  // development-only allowlist explicit rather than weakening production CSP.
+  allowedDevOrigins: ["*.e2b.app", "localhost", "127.0.0.1"],
   async headers() {
     return [
       {
