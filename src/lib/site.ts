@@ -22,6 +22,7 @@ export const PRIVATE_PATHS = [
   "/outreach",
   "/settings",
   "/sign-in",
+  "/reset-password",
 ] as const;
 export const PRIVATE_ROBOTS: Metadata["robots"] = {
   index: false,

@@ -137,7 +137,7 @@ Playwright uses npm-distributed serverless Chromium because this environment blo
 3. Apply migrations and configure auth redirects for the production hostname.
 4. Run the worker on a separate persistent Node process/container with the server-only service-role key. Do not run the worker inside a serverless request. For a public shared Overpass endpoint, use one worker and honour provider policy.
 5. Restrict outbound network access at infrastructure level. Candidate URL checking also validates and pins public DNS results. AI/Overpass endpoint URLs are administrator-controlled environment values; restrict who can edit deployment settings.
-6. Restart web/worker processes after changing configuration. Monitor structured worker logs and failed leases. Configure backups, HTTPS, email confirmation, production authentication rate limits, and your jurisdiction-specific privacy/retention policy before production use.
+6. Restart web/worker processes after changing configuration. Monitor structured worker logs and failed leases. Configure backups, HTTPS, email confirmation, production authentication rate limits, and your jurisdiction-specific privacy/retention policy before production use. The app has a short-lived, per-runtime API limiter (60 workspace reads/minute and 30 actions/minute per transient client bucket); configure a shared edge or Redis limiter separately if you need a distributed abuse-control guarantee.
 
 ### Current limitations / not claimed complete
 
@@ -146,7 +146,7 @@ Playwright uses npm-distributed serverless Chromium because this environment blo
 - No email/WhatsApp sending, delivery tracking, automatic follow-ups, or reply webhooks. Only draft management, approval, exports, and manual event records are implemented.
 - Provider rate limits are per worker; use one worker for shared endpoints. Work is resumable by requery/reconciliation, not an exact source cursor checkpoint.
 - The workspace currently loads up to 1,000 recent records per section, with a visible warning if rows are truncated and performs explorer filters/pagination in the client. High-volume production usage needs server-side filtered pagination, aggregate analytics, and transactional write/audit outbox operations.
-- Profile/security is basic email/password plus sign-out; MFA, recovery UI, organisations/team permissions, billing, and file storage are not implemented.
+- Profile/security includes email/password, password recovery at `/reset-password`, and sign-out. MFA, organisations/team permissions, billing, and file storage are not implemented. Configure Supabase email templates, Site URL, and allowed callback URLs before relying on recovery delivery.
 - No live deployment was created. The local preview and production build are available in this workspace.
 
 No part of the app guarantees worldwide coverage, current operation, accurate contacts, website absence, lawful outreach, or business outcomes. Human review and source/platform/legal compliance remain essential.

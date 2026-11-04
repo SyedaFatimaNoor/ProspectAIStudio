@@ -1,10 +1,24 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/supabase";
 import { supabaseConfigured } from "@/lib/supabase-config";
 import { aiConfigured } from "@/lib/ai";
 import { emptyWorkspace, type Workspace } from "@/lib/types";
+import {
+  clientRateLimitKey,
+  rateLimitHeaders,
+  takeRateLimit,
+} from "@/lib/rate-limit";
 export const dynamic = "force-dynamic";
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const rate = takeRateLimit(clientRateLimitKey(req.headers, "workspace-read"), {
+    limit: 60,
+    windowMs: 60_000,
+  });
+  if (!rate.allowed)
+    return NextResponse.json(
+      { error: "Too many workspace refreshes. Please wait a moment and try again." },
+      { status: 429, headers: rateLimitHeaders(rate) },
+    );
   const config: Workspace["config"] = {
     database: supabaseConfigured,
     discovery: Boolean(process.env.OVERPASS_URL),
@@ -12,7 +26,11 @@ export async function GET() {
   };
   try {
     const db = await serverSupabase();
-    if (!db) return NextResponse.json({ ...emptyWorkspace, config });
+    if (!db)
+      return NextResponse.json(
+        { ...emptyWorkspace, config },
+        { headers: rateLimitHeaders(rate) },
+      );
     const {
       data: { user },
       error: authError,
@@ -21,7 +39,11 @@ export async function GET() {
       throw new Error(
         "Authentication connection failed. Check Supabase configuration and try again.",
       );
-    if (!user) return NextResponse.json({ ...emptyWorkspace, config });
+    if (!user)
+      return NextResponse.json(
+        { ...emptyWorkspace, config },
+        { headers: rateLimitHeaders(rate) },
+      );
     // Backwards-compatible when this optional migration has not been installed.
     // This function exposes only operational metadata, never tokens or job owners.
     const { data: worker, error: workerError } = await db.rpc(
@@ -72,7 +94,7 @@ export async function GET() {
         },
         config,
       },
-      { headers: { "Cache-Control": "no-store" } },
+      { headers: rateLimitHeaders(rate) },
     );
   } catch (e) {
     return NextResponse.json(
@@ -81,7 +103,7 @@ export async function GET() {
         config,
         error: e instanceof Error ? e.message : "Database connection failed.",
       },
-      { status: 503 },
+      { status: 503, headers: rateLimitHeaders(rate) },
     );
   }
 }

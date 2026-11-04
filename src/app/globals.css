@@ -3329,6 +3329,7 @@ textarea {
   height: 49px;
   margin-bottom: 25px;
 }
+.auth-form h1,
 .auth-form h2 {
   font-size: 27px;
   letter-spacing: -0.9px;
@@ -3343,6 +3344,17 @@ textarea {
 }
 .auth-form .form-stack {
   gap: 19px;
+}
+.auth-recovery-link {
+  align-self: flex-end;
+  margin-top: -8px;
+  color: #4f6395;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-recovery-link:hover {
+  color: #243c75;
 }
 .auth-form .button {
   width: 100%;
@@ -5127,6 +5139,7 @@ textarea {
   .auth-form {
     max-width: 370px;
   }
+  .auth-form h1,
   .auth-form h2 {
     font-size: 29px;
   }
@@ -5802,6 +5815,7 @@ textarea {
   .auth-form-wrap {
     padding: 27px;
   }
+  .auth-form h1,
   .auth-form h2 {
     font-size: 28px;
   }
