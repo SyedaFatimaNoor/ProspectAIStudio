@@ -32,8 +32,13 @@ test("robots, sitemap, favicon and sharing assets return real content without br
   expect(new URL(home.headers().location, SITE_ORIGIN).pathname).toBe("/");
   const api = await request.get("/api/workspace");
   expect(api.headers()["x-robots-tag"]).toBe("noindex, nofollow");
+  expect(api.headers()["cache-control"]).toMatch(/private, no-store/);
+  expect(api.headers()["x-ratelimit-limit"]).toBe("60");
+  expect(api.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expect(api.headers()["x-frame-options"]).toBe("DENY");
   const callback = await request.get("/auth/callback", { maxRedirects: 0 });
   expect(callback.headers()["x-robots-tag"]).toBe("noindex, nofollow");
+  expect(callback.headers()["cache-control"]).toMatch(/private, no-store/);
 });
 
 test("public canonical and social metadata use production URLs and contain no fabricated structured claims", async ({

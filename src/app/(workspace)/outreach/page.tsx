@@ -151,7 +151,15 @@ export default function Outreach() {
         description="Thoughtful messages, a human review, and respect for every recipient."
       >
         <Badge tone="amber">Draft-only mode</Badge>
-        <Button onClick={newDraft}>
+        <Button
+          onClick={newDraft}
+          disabled={!data.businesses.length}
+          title={
+            !data.businesses.length
+              ? "Create and review a lead before starting an outreach draft."
+              : undefined
+          }
+        >
           <Plus size={16} />
           New draft
         </Button>
@@ -161,6 +169,13 @@ export default function Outreach() {
         authorised provider only after legal and platform-policy review. Public
         contact details do not imply consent.
       </Notice>
+      {!data.businesses.length && (
+        <Notice>
+          Create and review a lead before starting an outreach draft. No draft
+          can be addressed responsibly without a business record and its
+          evidence.
+        </Notice>
+      )}
       <div className="outreach-stats">
         {[
           [

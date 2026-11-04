@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -21,6 +21,12 @@ export default function SignIn() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("error") === "callback")
+      setMessage(
+        "That sign-in or recovery link is invalid or has expired. Request a new password-reset link and try again.",
+      );
+  }, []);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -136,6 +142,11 @@ export default function SignIn() {
                 placeholder="Enter your password"
               />
             </Field>
+            {mode === "signin" && (
+              <Link href="/reset-password" className="auth-recovery-link">
+                Forgot your password?
+              </Link>
+            )}
             {error && (
               <div role="alert">
                 <Notice tone="error">{error}</Notice>

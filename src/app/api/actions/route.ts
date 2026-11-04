@@ -18,6 +18,11 @@ import {
   cloudPauseBlocksDiscovery,
   pausedCloudWorkerMessage,
 } from "@/lib/cloud-worker";
+import {
+  clientRateLimitKey,
+  rateLimitHeaders,
+  takeRateLimit,
+} from "@/lib/rate-limit";
 export const maxDuration = 90;
 export async function POST(req: NextRequest) {
   try {
@@ -30,6 +35,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Invalid request origin." },
         { status: 403 },
+      );
+    const rate = takeRateLimit(clientRateLimitKey(req.headers, "workspace-action"), {
+      limit: 30,
+      windowMs: 60_000,
+    });
+    if (!rate.allowed)
+      return NextResponse.json(
+        { error: "Too many requests. Please wait a moment and try again." },
+        { status: 429, headers: rateLimitHeaders(rate) },
       );
     if (Number(req.headers.get("content-length") || 0) > 100000)
       return NextResponse.json(
@@ -57,7 +71,9 @@ export async function POST(req: NextRequest) {
         { status: 413 },
       );
     const input = JSON.parse(raw);
-    const type = z.string().parse(input.type);
+    const type = z
+      .object({ type: z.string().trim().min(1) })
+      .parse(input).type;
     const user_id = user.id;
     async function insert(table: string, values: Record<string, unknown>) {
       const r = await db!
@@ -497,17 +513,27 @@ export async function POST(req: NextRequest) {
       default:
         return NextResponse.json({ error: "Unknown action." }, { status: 400 });
     }
-    return NextResponse.json(result);
+    return NextResponse.json(result, { headers: rateLimitHeaders(rate) });
   } catch (e) {
-    if (e instanceof z.ZodError)
+    if (e instanceof z.ZodError) {
+      const labels: Record<string, string> = {
+        type: "Action",
+        business_id: "Business",
+        message_id: "Draft",
+        display_name: "Display name",
+        max_results: "Maximum results",
+      };
+      const errors = e.issues.map((issue) => {
+        const path = String(issue.path[0] || "");
+        if (!path) return "Your request is incomplete or invalid. Refresh and try again.";
+        const label = labels[path] || path.replaceAll("_", " ");
+        return `${label}: ${issue.message.replace(/^Invalid input:\s*/i, "")}`;
+      });
       return NextResponse.json(
-        {
-          error: e.issues
-            .map((i) => `${i.path.join(".")}: ${i.message}`)
-            .join("; "),
-        },
+        { error: [...new Set(errors)].join("; ") },
         { status: 400 },
       );
+    }
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Action failed. Try again." },
       { status: 400 },

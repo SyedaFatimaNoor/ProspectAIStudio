@@ -161,16 +161,26 @@ test("actual server denies unauthenticated writes and exposes no private data", 
     expect((await r.json()).error).toMatch(/Sign in/);
   }
 });
-test("sign in has accessible labels and native validation", async ({
+test("sign in exposes accessible account recovery and explains an expired callback", async ({
   page,
 }) => {
   await page.goto("/sign-in");
   await page.getByRole("button", { name: "Sign in to workspace" }).click();
   await expect(page.getByLabel("Email address")).toBeFocused();
+  await expect(page.getByRole("link", { name: "Forgot your password?" })).toHaveAttribute(
+    "href",
+    "/reset-password",
+  );
   await page
     .getByRole("button", { name: "Create an account", exact: true })
     .click();
   await expect(page.getByLabel("Password")).toHaveAttribute("minlength", "12");
+  await page.goto("/sign-in?error=callback");
+  await expect(page.getByRole("status")).toContainText(/invalid or has expired/i);
+  await page.getByRole("link", { name: "Forgot your password?" }).click();
+  await expect(page).toHaveURL(/\/reset-password$/);
+  await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send reset instructions" })).toBeVisible();
 });
 test("real unconfigured discovery is disabled and never reports success", async ({
   page,
@@ -340,6 +350,19 @@ test("unverified leads cannot generate proposals", async ({ page }) => {
     page.getByRole("button", { name: "Generate with AI" }),
   ).toBeDisabled();
 });
+test("outreach explains why a draft cannot start without a lead", async ({ page }) => {
+  await mocked(page, { businesses: [] });
+  await page.goto("/outreach");
+  const newDraft = page.getByRole("button", { name: "New draft" });
+  await expect(newDraft).toBeDisabled();
+  await expect(newDraft).toHaveAttribute("title", /Create and review a lead/);
+  await expect(
+    page.getByText("No draft can be addressed responsibly without a business record", {
+      exact: false,
+    }),
+  ).toBeVisible();
+});
+
 test("outreach requires saving, preview and approval; sends remain disabled", async ({
   page,
 }) => {
