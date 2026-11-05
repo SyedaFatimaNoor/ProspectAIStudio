@@ -55,9 +55,11 @@ Manual observations must be within the last 90 days. Different hosts are a minim
 - Ollama Cloud uses the server-side `OLLAMA_API_KEY` and native `https://ollama.com/api/chat` endpoint with `gemma4:31b`.
 - Existing OpenAI-compatible `/chat/completions` configuration remains available through `AI_BASE_URL`, `AI_MODEL`, and optional `AI_API_KEY`.
 - Local models require suitable hardware; no paid service is required for manual/fact-based drafts. A Vercel deployment cannot reach an Ollama instance on a developer laptop.
-- Only whitelisted name, category, city, and country are sent. No contact details, notes, scraped page content, cookies, or keys are included in the prompt.
-- Untrusted facts are JSON-delimited data under fixed system instructions. The model has no tools, network actions, database access, or send capability.
-- 60-second timeout, bounded output, human editing and review. Provider errors are surfaced without claiming success.
+- Only whitelisted name, category, city, country, a sanitised verified description, and a fixed verified-activity label are sent. No contact details, website claims, notes, scraped page content, cookies, source URLs, or keys are included in the prompt.
+- Untrusted facts are JSON-delimited data under fixed system instructions. Instruction-like description text is suppressed before the request. The model has no tools, network actions, database access, or send capability.
+- The response must match [`ai-concept.schema.json`](ai-concept.schema.json), a strict draft 2020-12 JSON Schema generated from the runtime Zod contract. Missing sections, mismatched facts, invented email addresses or phone numbers, unsupported URLs, website-absence claims, and prompt-injection echoes are rejected before persistence.
+- A valid response is rendered as editable website copy, structure, visual direction, and clearly labelled uncertainties. The server saves provider name, model, generation timestamp, structured output, and a whitelisted facts/provenance snapshot. Regeneration updates the owned AI concept and increments its revision.
+- 60-second timeout, bounded output, human editing and review. Timeouts, 429s, provider failures, malformed output, and unconfigured providers are surfaced as errors with no concept saved.
 - AI suggestions still need review. No generated concept is claimed to be built, published, or approved.
 
 ## Messaging

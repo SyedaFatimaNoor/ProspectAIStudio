@@ -20,6 +20,8 @@ import {
 import { factBasedConcept } from "../src/lib/proposal";
 import { csvCell } from "../src/lib/utils";
 import { aiConfigured, CompatibleAI } from "../src/lib/ai";
+import { selectVerifiedLeadFacts } from "../src/lib/ai-schema";
+import { publicVerifiedLead, validConceptJson } from "./ai-fixtures";
 import { takeStoredAuthAttempt } from "../src/lib/auth-attempt-limiter";
 import { checkProviderHealth } from "../src/lib/provider-health";
 import { snapshotReadiness } from "../src/lib/source-readiness";
@@ -392,10 +394,14 @@ test("AI gracefully reports missing configuration", async () => {
   delete process.env.OLLAMA_API_KEY;
   delete process.env.AI_BASE_URL;
   delete process.env.AI_MODEL;
+  const { facts } = selectVerifiedLeadFacts(
+    publicVerifiedLead,
+    () => "2026-11-05T12:00:00.000Z",
+  );
   try {
     assert.equal(aiConfigured(), false);
     await assert.rejects(
-      new CompatibleAI().generateConcept(business),
+      new CompatibleAI().generateConcept(facts),
       /AI is not configured/,
     );
   } finally {
@@ -417,6 +423,10 @@ test("Ollama Cloud uses a dedicated server key and native bounded chat request",
     model: process.env.AI_MODEL,
     fetch: globalThis.fetch,
   };
+  const { facts } = selectVerifiedLeadFacts(
+    publicVerifiedLead,
+    () => "2026-11-05T12:00:00.000Z",
+  );
   let url = "";
   let init: RequestInit | undefined;
   process.env.OLLAMA_API_KEY = "test-only-ollama-key";
@@ -428,7 +438,7 @@ test("Ollama Cloud uses a dedicated server key and native bounded chat request",
     return new Response(
       JSON.stringify({
         model: "gemma4:31b",
-        message: { role: "assistant", content: "TEST ONLY — Ollama reply" },
+        message: { role: "assistant", content: validConceptJson(facts) },
         done: true,
       }),
       { headers: { "Content-Type": "application/json" } },
@@ -436,15 +446,10 @@ test("Ollama Cloud uses a dedicated server key and native bounded chat request",
   }) as typeof fetch;
   try {
     assert.equal(aiConfigured(), true);
-    assert.equal(
-      await new CompatibleAI().generateConcept({
-        name: "TEST ONLY — Fixture Café",
-        category: "cafe",
-        city: "Karachi",
-        country: "Pakistan",
-      }),
-      "TEST ONLY — Ollama reply",
-    );
+    const generation = await new CompatibleAI().generateConcept(facts);
+    assert.equal(generation.provider, "Ollama Cloud");
+    assert.equal(generation.model, "gemma4:31b");
+    assert.equal(generation.concept.supported_facts.name, "Café nt");
     const endpoint = new URL(url);
     assert.equal(endpoint.protocol, "https:");
     assert.equal(endpoint.hostname, "ollama.com");
@@ -458,6 +463,15 @@ test("Ollama Cloud uses a dedicated server key and native bounded chat request",
     assert.equal(request.stream, false);
     assert.equal(request.options.temperature, 0.4);
     assert.equal(request.options.num_predict, 2200);
+    assert.equal(
+      request.format.$schema,
+      "https://json-schema.org/draft/2020-12/schema",
+    );
+    assert.equal(request.format.type, "object");
+    assert.ok(request.format.properties.website_copy);
+    const userMessage = request.messages[1].content as string;
+    assert.match(userMessage, /verified_lead_facts/);
+    assert.doesNotMatch(userMessage, /\+49|@|ntcafe\.de|source_url|phone/);
   } finally {
     if (old.ollama) process.env.OLLAMA_API_KEY = old.ollama;
     else delete process.env.OLLAMA_API_KEY;

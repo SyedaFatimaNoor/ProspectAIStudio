@@ -99,9 +99,11 @@ To make one server-side smoke-test request through the application's Ollama clie
 node --env-file=.env --import tsx scripts/test-ollama.ts
 ```
 
-The command prints only the real provider reply. It is not an application health check and should not be run from browser code.
+The command runs the actual structured concept workflow against one public, source-backed verified lead fixture. It prints only the validated structured reply actually received from Ollama; no key, health message, or production workspace record is printed. The live script uses a process-local repository, while automated tests cover authenticated database persistence with an isolated fake repository.
 
 A signed-in operator can instead use **Settings → Integrations → Test AI connection**. The server sends a short fixed connectivity prompt with no lead/contact data and shows only an actual bounded reply, model, and latency. Health metadata (not the reply) is audited. It is rate-limited to three checks per five minutes in one application runtime; production verification still requires an operator to run it with a configured key. The compatible fallback uses `AI_BASE_URL`, `AI_MODEL`, and the optional server-only `AI_API_KEY`; choose only a provider whose terms permit the workload.
+
+Website concepts use the strict JSON Schema in [`docs/ai-concept.schema.json`](docs/ai-concept.schema.json), generated from the runtime Zod contract with `npm run schema:ai`. The server whitelists manually verified name, category, city, country, and activity; contact details, website claims, notes, keys, source URLs, and arbitrary lead fields never reach the model. Invalid model replies—including invented contacts, website-absence claims, URLs, mismatched facts, or prompt-injection echoes—are rejected before anything is saved. A valid concept is rendered as editable Markdown and saved automatically with its provider, model, generation timestamp, structured output, and a facts/provenance snapshot. **Regenerate with AI** updates the owned AI concept and increments its revision. Timeouts, 429s, provider failures, malformed output, and unconfigured providers display controlled errors without saving a concept.
 
 See [provider documentation](docs/PROVIDERS.md) for data restrictions, verification scoring, failure handling, AI boundaries, and messaging requirements.
 
@@ -131,8 +133,8 @@ npm audit --omit=dev
 
 Playwright uses npm-distributed serverless Chromium because this environment blocks Playwright's usual browser CDN. The config extracts its bundled libraries, launches with normal web security, and uses one worker. On unsupported platforms, adapt `playwright.config.ts` to your locally installed Playwright browser. `PLAYWRIGHT_BASE_URL` can point tests at a running production build; otherwise Playwright starts the dev server. Do not run a build and dev server against the same `.next` directory simultaneously.
 
-- Unit tests exercise provider validation, deduplication, query escaping, private-network blocking, redirect classification, timeout uncertainty, draft schemas, safe CSV, and optional AI degradation.
-- Browser tests use the actual Next.js UI and real unauthenticated API guards. Authenticated workflows use **test-only intercepted HTTP responses**, not fabricated production records. They cover discovery queuing, lead filters/details/evidence, proposal saving/export, draft editing/approval gating, suppression, provider errors, and responsive/keyboard behaviour.
+- Unit tests exercise provider validation, deduplication, query escaping, private-network blocking, redirect classification, timeout uncertainty, draft schemas, safe CSV, strict AI output validation, two-user-safe AI workflow persistence/regeneration, empty and conflicting lead facts, timeouts, 429s, malformed replies, prompt injection, and optional AI degradation.
+- Browser tests use the actual Next.js UI and real unauthenticated API guards. Authenticated workflows use **test-only intercepted HTTP responses**, not fabricated production records. They cover discovery queuing, lead filters/details/evidence, proposal saving/export, AI concept metadata/regeneration/provider errors, draft editing/approval gating, suppression, and responsive/keyboard behaviour.
 - Automated axe WCAG A/AA tests cover the public homepage and all main pages. Automated scans do not replace a full assistive-technology audit.
 - Transactional live Supabase checks verified RLS read/write isolation, cross-tenant relation enforcement, send blocking, approval requirements, and opt-out propagation. Fixtures were rolled back. See `tests/database-security.sql` to repeat them.
 

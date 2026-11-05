@@ -1,3 +1,5 @@
+import type { AIConceptOutput } from "./ai-schema";
+
 export type Business = {
   id: string;
   name: string;
@@ -58,6 +60,12 @@ export type Proposal = {
   version: number;
   origin: string;
   created_at: string;
+  updated_at?: string;
+  ai_provider?: string | null;
+  ai_model?: string | null;
+  generated_at?: string | null;
+  ai_output?: AIConceptOutput | null;
+  facts_snapshot?: unknown;
 };
 export type Message = {
   id: string;

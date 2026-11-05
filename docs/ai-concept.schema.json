@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "number",
+      "const": 1
+    },
+    "concept_type": {
+      "type": "string",
+      "const": "editable_website_concept"
+    },
+    "supported_facts": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "location": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "activity": {
+          "type": "string",
+          "const": "Manually verified active"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "location",
+        "activity"
+      ],
+      "additionalProperties": false
+    },
+    "uncertainties": {
+      "type": "object",
+      "properties": {
+        "contacts": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 600
+        },
+        "website_status": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 600
+        },
+        "services_and_offers": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 600
+        },
+        "hours_and_availability": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 600
+        },
+        "pricing": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 600
+        },
+        "reviews_and_claims": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 600
+        },
+        "identity_and_lawful_basis": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 600
+        }
+      },
+      "required": [
+        "contacts",
+        "website_status",
+        "services_and_offers",
+        "hours_and_availability",
+        "pricing",
+        "reviews_and_claims",
+        "identity_and_lawful_basis"
+      ],
+      "additionalProperties": false
+    },
+    "website_copy": {
+      "type": "object",
+      "properties": {
+        "headline": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 180
+        },
+        "subheading": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000
+        },
+        "sections": {
+          "minItems": 3,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              },
+              "heading": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 180
+              },
+              "body": {
+                "type": "string",
+                "minLength": 30,
+                "maxLength": 1600
+              }
+            },
+            "required": [
+              "name",
+              "heading",
+              "body"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "calls_to_action": {
+          "minItems": 1,
+          "maxItems": 4,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80
+              },
+              "guidance": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 1000
+              }
+            },
+            "required": [
+              "label",
+              "guidance"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "headline",
+        "subheading",
+        "sections",
+        "calls_to_action"
+      ],
+      "additionalProperties": false
+    },
+    "website_structure": {
+      "minItems": 3,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 1000
+          },
+          "content_notes": {
+            "type": "string",
+            "minLength": 30,
+            "maxLength": 1600
+          }
+        },
+        "required": [
+          "page",
+          "purpose",
+          "content_notes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "visual_direction": {
+      "type": "object",
+      "properties": {
+        "mood": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000
+        },
+        "palette": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000
+        },
+        "typography": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000
+        },
+        "layout": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000
+        },
+        "accessibility": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000
+        },
+        "imagery": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "mood",
+        "palette",
+        "typography",
+        "layout",
+        "accessibility",
+        "imagery"
+      ],
+      "additionalProperties": false
+    },
+    "review_notes": {
+      "minItems": 1,
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "enum": [
+              "activity",
+              "website_status",
+              "contacts",
+              "content_rights",
+              "lawful_basis"
+            ]
+          },
+          "guidance": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "topic",
+          "guidance"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "concept_type",
+    "supported_facts",
+    "uncertainties",
+    "website_copy",
+    "website_structure",
+    "visual_direction",
+    "review_notes"
+  ],
+  "additionalProperties": false
+}
