@@ -109,17 +109,17 @@ See [provider documentation](docs/PROVIDERS.md) for data restrictions, verificat
 
 ## Application routes
 
-| Route           | Purpose                                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `/`, `/home`    | Public product information, labelled sample preview, privacy/responsible-use information, FAQs                            |
-| `/sign-in`      | Email/password sign in and account creation                                                                               |
-| `/overview`     | Database-derived metrics, chart, pipeline, jobs, sources, and honest empty states                                         |
-| `/discovery`    | Bounded discovery form, source configuration, job controls, progress, logs/errors                                         |
-| `/leads`        | Search, filters, sorting, pagination, column controls, selection, CSV export, detailed provenance/history/notes, deletion |
-| `/verification` | Independent activity/website assessment and manual evidence workflow                                                      |
-| `/studio`       | Optional AI or manual templates, editing, revisions, saved proposals and Markdown export                                  |
-| `/outreach`     | Drafting, personalisation, preview, approval, manual events and suppression                                               |
-| `/settings`     | Provider status/setup, preferences, retention cleanup, profile and sign out                                               |
+| Route           | Purpose                                                                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`, `/home`    | Public product information, labelled sample preview, privacy/responsible-use information, FAQs                                                                          |
+| `/sign-in`      | Email/password sign in and account creation                                                                                                                             |
+| `/overview`     | Database-derived metrics, chart, pipeline, jobs, sources, and honest empty states                                                                                       |
+| `/discovery`    | Bounded discovery form, source configuration, job controls, progress, logs/errors                                                                                       |
+| `/leads`        | Search, filters, sorting, pagination, column controls, selection, CSV export, detailed provenance/history/notes, deletion                                               |
+| `/verification` | Independent activity/website assessment and manual evidence workflow                                                                                                    |
+| `/studio`       | Structured concept editor, fact-based/optional AI drafts, provenance and draft status, revisions, versioning, desktop/mobile concept-only previews, and Markdown export |
+| `/outreach`     | Drafting, personalisation, preview, approval, manual events and suppression                                                                                             |
+| `/settings`     | Provider status/setup, preferences, retention cleanup, profile and sign out                                                                                             |
 
 ## Testing and quality
 
@@ -133,9 +133,10 @@ npm audit --omit=dev
 
 Playwright uses npm-distributed serverless Chromium because this environment blocks Playwright's usual browser CDN. The config extracts its bundled libraries, launches with normal web security, and uses one worker. On unsupported platforms, adapt `playwright.config.ts` to your locally installed Playwright browser. `PLAYWRIGHT_BASE_URL` can point tests at a running production build; otherwise Playwright starts the dev server. Do not run a build and dev server against the same `.next` directory simultaneously.
 
-- Unit tests exercise provider validation, deduplication, query escaping, private-network blocking, redirect classification, timeout uncertainty, draft schemas, safe CSV, strict AI output validation, two-user-safe AI workflow persistence/regeneration, empty and conflicting lead facts, timeouts, 429s, malformed replies, prompt injection, and optional AI degradation.
-- Browser tests use the actual Next.js UI and real unauthenticated API guards. Authenticated workflows use **test-only intercepted HTTP responses**, not fabricated production records. They cover discovery queuing, lead filters/details/evidence, proposal saving/export, AI concept metadata/regeneration/provider errors, draft editing/approval gating, suppression, and responsive/keyboard behaviour.
+- Unit tests exercise provider validation, deduplication, query escaping, private-network blocking, redirect classification, timeout uncertainty, draft schemas, safe CSV, strict AI output validation, two-user-safe AI workflow persistence/regeneration, Studio section round-tripping/provenance/status metadata, empty and conflicting lead facts, timeouts, 429s, malformed replies, prompt injection, and optional AI degradation.
+- Browser tests use the actual Next.js UI and real unauthenticated API guards. Authenticated workflows use **test-only intercepted HTTP responses**, not fabricated production records. They cover discovery queuing, lead filters/details/evidence, the complete Website Studio workflow from verified test lead through structured edits, persistence after reload, versioning, desktop/mobile concept-only previews, and Markdown export, plus AI concept metadata/regeneration/provider errors, draft editing/approval gating, suppression, and responsive/keyboard behaviour.
 - Automated axe WCAG A/AA tests cover the public homepage and all main pages. Automated scans do not replace a full assistive-technology audit.
+- The complete Website Studio workflow validation, including the 15-step browser journey and safety boundaries, is documented in [`docs/STUDIO_WORKFLOW_VALIDATION.md`](docs/STUDIO_WORKFLOW_VALIDATION.md).
 - Transactional live Supabase checks verified RLS read/write isolation, cross-tenant relation enforcement, send blocking, approval requirements, and opt-out propagation. Fixtures were rolled back. See `tests/database-security.sql` to repeat them.
 
 ## Deployment
