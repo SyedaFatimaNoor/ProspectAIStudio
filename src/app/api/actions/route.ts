@@ -31,6 +31,7 @@ import {
   rateLimitHeaders,
   takeRateLimit,
 } from "@/lib/rate-limit";
+import { rejectClientTenantOverride } from "@/lib/tenant-security";
 export const maxDuration = 90;
 export async function POST(req: NextRequest) {
   try {
@@ -81,8 +82,10 @@ export async function POST(req: NextRequest) {
         { error: "Request too large." },
         { status: 413 },
       );
-    const input = JSON.parse(raw);
+    const input = rejectClientTenantOverride(JSON.parse(raw));
     const type = z.object({ type: z.string().trim().min(1) }).parse(input).type;
+    // Never use a client-supplied tenant/workspace identifier. Every query
+    // below derives its scope from this verified Supabase session user.
     const user_id = user.id;
     if (type === "test_ai" || type === "test_provider") {
       const checkedProvider =
