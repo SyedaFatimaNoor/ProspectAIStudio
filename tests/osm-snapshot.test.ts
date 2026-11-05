@@ -62,7 +62,10 @@ test("snapshot rows map to the same source shape with attribution", async () => 
     business.facts.attribution,
     "© OpenStreetMap contributors, ODbL",
   );
-  assert.equal(business.facts.source_format, "OpenStreetMap snapshot dated 2026-10-30");
+  assert.equal(
+    business.facts.source_format,
+    "OpenStreetMap snapshot dated 2026-10-30",
+  );
   assert.equal(business.facts.distance_km, 1.2);
   assert.match(String(business.facts.activity_note), /not evidence of current/);
 });
@@ -122,6 +125,75 @@ const secret = "test-only-" + "x".repeat(64);
 const jobId = randomUUID();
 const lease = randomUUID();
 
+test("an unreadable cloud snapshot is not claimed or auto-paused as empty", async () => {
+  const calls: string[] = [];
+  const env = {
+    get(name: string) {
+      const values: Record<string, string> = {
+        PA_WORKER_TOKEN: secret,
+        PA_OSM_SNAPSHOT: "1",
+      };
+      return values[name];
+    },
+  };
+  const handler = createWorkerHandler({
+    env,
+    database: () => ({
+      async rpc(name) {
+        calls.push(name);
+        return {
+          data: null,
+          error: { message: "Snapshot status database connection failed" },
+        };
+      },
+    }),
+  });
+  const response = await handler(
+    new Request("https://example.invalid/worker", {
+      method: "POST",
+      headers: { "x-worker-token": secret },
+    }),
+  );
+  assert.equal(response.status, 503);
+  assert.deepEqual(calls, ["pa_osm_snapshot_status"]);
+});
+
+test("an empty cloud snapshot pauses before claiming a tenant job", async () => {
+  const calls: string[] = [];
+  const env = {
+    get(name: string) {
+      const values: Record<string, string> = {
+        PA_WORKER_TOKEN: secret,
+        PA_OSM_SNAPSHOT: "1",
+      };
+      return values[name];
+    },
+  };
+  const handler = createWorkerHandler({
+    env,
+    database: () => ({
+      async rpc(name) {
+        calls.push(name);
+        if (name === "pa_osm_snapshot_status")
+          return { data: { businesses: 0, places: 0 }, error: null };
+        if (name === "pa_cloud_pause_source")
+          return { data: null, error: null };
+        throw new Error(`Unexpected RPC ${name}`);
+      },
+    }),
+  });
+  const response = await handler(
+    new Request("https://example.invalid/worker", {
+      method: "POST",
+      headers: { "x-worker-token": secret },
+    }),
+  );
+  assert.equal(response.status, 503);
+  const payload = (await response.json()) as { error?: string };
+  assert.match(String(payload.error), /snapshot is not ready/i);
+  assert.deepEqual(calls, ["pa_osm_snapshot_status", "pa_cloud_pause_source"]);
+});
+
 test("the cloud worker uses the snapshot with no endpoint and no network fetch", async () => {
   const calls: string[] = [];
   const env = {
@@ -152,6 +224,8 @@ test("the cloud worker uses the snapshot with no endpoint and no network fetch",
           },
           error: null,
         };
+      if (name === "pa_osm_snapshot_status")
+        return { data: { businesses: 1, places: 1 }, error: null };
       if (name === "pa_osm_search") {
         assert.ok(args);
         return { data: [row()], error: null };
@@ -178,7 +252,12 @@ test("the cloud worker uses the snapshot with no endpoint and no network fetch",
   } finally {
     globalThis.fetch = globalFetch;
   }
-  assert.deepEqual(calls, ["pa_cloud_claim", "pa_osm_search", "pa_cloud_commit"]);
+  assert.deepEqual(calls, [
+    "pa_osm_snapshot_status",
+    "pa_cloud_claim",
+    "pa_osm_search",
+    "pa_cloud_commit",
+  ]);
 });
 
 test("the cloud worker still refuses to run with no source configured", async () => {

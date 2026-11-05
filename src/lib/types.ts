@@ -89,7 +89,12 @@ export type ProviderHealthRecord = {
   recommended_action: string;
 };
 export type Workspace = {
-  user: { id: string; email?: string; display_name?: string; updated_at?: string } | null;
+  user: {
+    id: string;
+    email?: string;
+    display_name?: string;
+    updated_at?: string;
+  } | null;
   businesses: Business[];
   jobs: Job[];
   proposals: Proposal[];
@@ -111,6 +116,7 @@ export type Workspace = {
   config: {
     database: boolean;
     discovery: boolean;
+    discovery_error?: string;
     ai: boolean;
     self_hosted_worker?: boolean;
     snapshot?: {

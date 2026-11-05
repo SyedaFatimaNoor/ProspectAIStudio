@@ -58,8 +58,16 @@ export function discoveryBlockReason(
   if (!data.config.database)
     return "Database setup is required to save discovery jobs. View setup instructions in Settings.";
   if (!data.config.discovery)
-    return "No discovery source is configured. Ask the operator to configure a permitted source in Settings. No search was run.";
-  if (cloudPauseBlocksDiscovery(data.config.worker, Boolean(data.config.self_hosted_worker)))
+    return (
+      data.config.discovery_error ||
+      "No discovery source is configured. Ask the operator to configure a permitted source in Settings. No search was run."
+    );
+  if (
+    cloudPauseBlocksDiscovery(
+      data.config.worker,
+      Boolean(data.config.self_hosted_worker),
+    )
+  )
     return pausedCloudWorkerMessage;
   // A missing status is not proof that a separately configured worker is down.
   // Allow queuing, but explain the uncertainty instead of claiming live readiness.

@@ -7,6 +7,7 @@ import type {
   SearchInput,
   DiscoveredBusiness,
 } from "../../../src/lib/discovery";
+import { snapshotReadiness } from "../../../src/lib/source-readiness";
 
 // Native Web APIs only: single-file connector deployments must not depend on
 // runtime npm/GitHub imports. No credentials are ever bundled into this file.
@@ -158,6 +159,53 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
       db = database ? database() : databaseClient(env, deadline);
     } catch {
       return reply({ error: "Worker database configuration is missing" }, 503);
+    }
+    if (snapshot) {
+      // Check aggregate readiness before claiming. An enabled snapshot flag alone
+      // does not prove it contains source rows, and an empty source must never
+      // turn a queued discovery into an empty completed result.
+      try {
+        const { data, error } = await db.rpc("pa_osm_snapshot_status");
+        if (error)
+          return reply(
+            {
+              error:
+                "OpenStreetMap snapshot readiness could not be verified. No job was claimed; keep scheduling paused.",
+            },
+            503,
+          );
+        const readiness = snapshotReadiness(data);
+        if (!readiness.ready) {
+          const reason =
+            readiness.message ||
+            "The OpenStreetMap snapshot is not ready for discovery. No job was claimed.";
+          const paused = await db.rpc("pa_cloud_pause_source", {
+            p_error: reason,
+          });
+          if (paused.error)
+            console.error(
+              JSON.stringify({
+                event: "cloud_source_pause_failed",
+                error: paused.error.message.slice(0, 500),
+              }),
+            );
+          return reply(
+            {
+              error:
+                "OpenStreetMap snapshot is not ready. No job was claimed; scheduling is paused pending source setup.",
+            },
+            503,
+          );
+        }
+      } catch {
+        return reply(
+          {
+            error:
+              "OpenStreetMap snapshot readiness could not be verified. No job was claimed; keep scheduling paused.",
+          },
+          503,
+        );
+      }
     }
     let claimed: ReturnType<typeof claim> | null = null;
     try {

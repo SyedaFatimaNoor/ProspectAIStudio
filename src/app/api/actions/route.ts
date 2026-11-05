@@ -19,7 +19,9 @@ import {
 import {
   discoverySourceConfigured,
   localSourceOnly,
+  snapshotEnabled,
 } from "@/lib/discovery";
+import { snapshotReadiness } from "@/lib/source-readiness";
 import {
   cloudPauseBlocksDiscovery,
   pausedCloudWorkerMessage,
@@ -42,10 +44,13 @@ export async function POST(req: NextRequest) {
         { error: "Invalid request origin." },
         { status: 403 },
       );
-    const rate = takeRateLimit(clientRateLimitKey(req.headers, "workspace-action"), {
-      limit: 30,
-      windowMs: 60_000,
-    });
+    const rate = takeRateLimit(
+      clientRateLimitKey(req.headers, "workspace-action"),
+      {
+        limit: 30,
+        windowMs: 60_000,
+      },
+    );
     if (!rate.allowed)
       return NextResponse.json(
         { error: "Too many requests. Please wait a moment and try again." },
@@ -77,13 +82,13 @@ export async function POST(req: NextRequest) {
         { status: 413 },
       );
     const input = JSON.parse(raw);
-    const type = z
-      .object({ type: z.string().trim().min(1) })
-      .parse(input).type;
+    const type = z.object({ type: z.string().trim().min(1) }).parse(input).type;
     const user_id = user.id;
     if (type === "test_ai" || type === "test_provider") {
       const checkedProvider =
-        type === "test_ai" ? "ai" : z.string().trim().max(40).parse(input.provider);
+        type === "test_ai"
+          ? "ai"
+          : z.string().trim().max(40).parse(input.provider);
       const healthRate = takeRateLimit(
         `provider-health:${user_id}:${checkedProvider}`,
         { limit: 3, windowMs: 5 * 60_000 },
@@ -145,20 +150,25 @@ export async function POST(req: NextRequest) {
         .eq("user_id", user_id)
         .eq("provider", health.provider)
         .maybeSingle();
-      if (priorError) throw new Error(`Unable to read provider health: ${priorError.message}`);
+      if (priorError)
+        throw new Error(
+          `Unable to read provider health: ${priorError.message}`,
+        );
       const { data: saved, error } = await db!
         .from("pa_provider_health")
         .upsert(
           {
             user_id,
             ...health,
-            last_success_at: health.last_success_at || prior?.last_success_at || null,
+            last_success_at:
+              health.last_success_at || prior?.last_success_at || null,
           },
           { onConflict: "user_id,provider" },
         )
         .select()
         .single();
-      if (error) throw new Error(`Unable to save provider health: ${error.message}`);
+      if (error)
+        throw new Error(`Unable to save provider health: ${error.message}`);
       return saved;
     }
     let result: unknown = { ok: true };
@@ -168,10 +178,25 @@ export async function POST(req: NextRequest) {
           return NextResponse.json(
             {
               error:
-                "No discovery source is configured. Set OVERPASS_URL on the server after reviewing the provider policy. No search was run.",
+                "No discovery source is configured. Configure a reviewed Overpass endpoint, a local extract, or an attributed OSM snapshot. No search was run.",
             },
             { status: 409 },
           );
+        if (snapshotEnabled()) {
+          const { data: snapshot, error: snapshotError } = await db.rpc(
+            "pa_osm_snapshot_status",
+          );
+          const readiness = snapshotReadiness(snapshotError ? null : snapshot);
+          if (!readiness.ready)
+            return NextResponse.json(
+              {
+                error:
+                  readiness.message ||
+                  "The OpenStreetMap snapshot is not ready for discovery. No search was run.",
+              },
+              { status: 409 },
+            );
+        }
         // A missing status function is intentionally not treated as a failure:
         // self-hosted deployments may use a separate worker. An explicit pause,
         // however, must reject direct API calls as well as the disabled UI.
@@ -629,7 +654,8 @@ export async function POST(req: NextRequest) {
       };
       const errors = e.issues.map((issue) => {
         const path = String(issue.path[0] || "");
-        if (!path) return "Your request is incomplete or invalid. Refresh and try again.";
+        if (!path)
+          return "Your request is incomplete or invalid. Refresh and try again.";
         const label = labels[path] || path.replaceAll("_", " ");
         return `${label}: ${issue.message.replace(/^Invalid input:\s*/i, "")}`;
       });

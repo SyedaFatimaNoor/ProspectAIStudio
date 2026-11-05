@@ -34,7 +34,8 @@ OpenStreetMap is an open database (ODbL), so a bounded country snapshot may be s
 2. Download the country `.osm.pbf` from `https://download.geofabrik.de` into `.osm-cache/` (gitignored) and verify its published `.md5`.
 3. `npm run osm:snapshot -- --file=.osm-cache/<country>.osm.pbf --country=<country name as users type it>` builds and stores `.osm-cache/snapshot-<country>.json`. Add `--load` to upsert it through the service-role RPCs. The parse takes minutes and stays on the operator's machine; the key never leaves it.
 4. Set Edge Function secret `PA_OSM_SNAPSHOT=1` (replaces the `PA_OVERPASS_URL` requirement) and app/worker environment `OSM_SNAPSHOT=1`. Snapshot selection takes precedence over `OSM_EXTRACT_PATH`.
-5. Re-run `tests/osm-snapshot.sql`, then enable the singleton row (operator SQL below).
+5. Re-run `tests/osm-snapshot.sql`. The application and Edge worker both verify aggregate snapshot readiness before allowing or claiming a job: **both** place and business counts must be non-zero. An empty/unreadable snapshot blocks new jobs; the worker pauses scheduling before it can claim an existing job. Apply `202611050002_cloud_source_readiness.sql` together with the matching worker bundle before relying on that guard.
+6. Only after the snapshot status shows data and the worker readiness call succeeds may an authorised operator consider enabling the singleton row (operator SQL below).
 
 A snapshot is a dated copy, so each result carries `source_format: OpenStreetMap snapshot dated <date>` and the job stays listing-only. Refresh it deliberately; `pa_osm_snapshot_status()` reports the snapshot date so an old copy cannot be mistaken for live data. City scoping is a place hierarchy (a city plus its smaller places within a rank-based radius), so a listing in one city cannot appear in another city's search.
 
