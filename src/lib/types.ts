@@ -124,6 +124,15 @@ export type Workspace = {
       places: number;
       oldest_snapshot: string | null;
       newest_snapshot: string | null;
+      import_status?: "empty" | "loading" | "ready" | "failed" | string;
+      source_name?: string | null;
+      source_url?: string | null;
+      attribution?: string | null;
+      dataset_timestamp?: string | null;
+      last_successful_import_at?: string | null;
+      places_imported?: number;
+      businesses_imported?: number;
+      last_import_error?: string | null;
     };
     worker?: {
       enabled: boolean;

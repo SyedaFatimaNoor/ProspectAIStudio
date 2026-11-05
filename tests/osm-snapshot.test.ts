@@ -64,7 +64,7 @@ test("snapshot rows map to the same source shape with attribution", async () => 
   );
   assert.equal(
     business.facts.source_format,
-    "OpenStreetMap snapshot dated 2026-10-30",
+    "OpenStreetMap snapshot record dated 2026-10-30",
   );
   assert.equal(business.facts.distance_km, 1.2);
   assert.match(String(business.facts.activity_note), /not evidence of current/);

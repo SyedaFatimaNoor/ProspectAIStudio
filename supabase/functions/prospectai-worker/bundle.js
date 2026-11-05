@@ -432,7 +432,7 @@ async function discoverOsmSnapshot(input, rpc, signal) {
         attribution: "\xA9 OpenStreetMap contributors, ODbL",
         observed_at: (/* @__PURE__ */ new Date()).toISOString(),
         website_link: website,
-        source_format: `OpenStreetMap snapshot dated ${row.snapshot_date}`,
+        source_format: `OpenStreetMap snapshot record dated ${row.snapshot_date}`,
         distance_km: row.distance_km,
         activity_note: "Snapshot listing. Listing edits are not evidence of current business operation."
       }
@@ -454,14 +454,31 @@ function snapshotReadiness(value) {
   const status = value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
   const businesses = count(status?.businesses);
   const places = count(status?.places);
-  if (businesses > 0 && places > 0)
-    return { ready: true, businesses, places, message: null };
-  return {
-    ready: false,
-    businesses,
-    places,
-    message: "The OpenStreetMap snapshot is enabled but has no searchable places or businesses. Load a lawful, attributed extract and validate one bounded search while scheduling remains paused. No search was run."
-  };
+  const importState = status?.import_status === void 0 ? null : typeof status.import_status === "string" ? status.import_status : "unknown";
+  if (importState && importState !== "ready" && importState !== "empty") {
+    const detail = typeof status?.last_import_error === "string" && status.last_import_error ? ` ${status.last_import_error.slice(0, 180)}` : "";
+    return {
+      ready: false,
+      businesses,
+      places,
+      message: `The OpenStreetMap snapshot import is ${importState}, not ready. Discovery remains blocked until a complete lawful import records its provenance.${detail}`
+    };
+  }
+  if (!businesses || !places)
+    return {
+      ready: false,
+      businesses,
+      places,
+      message: "The OpenStreetMap snapshot is enabled but has no searchable places or businesses (the snapshot is empty). Load a lawful, attributed extract and validate one bounded search while scheduling remains paused. No search was run."
+    };
+  if (importState && importState !== "ready")
+    return {
+      ready: false,
+      businesses,
+      places,
+      message: `The OpenStreetMap snapshot import is ${importState}, not ready. Discovery remains blocked until a complete lawful import records its provenance.`
+    };
+  return { ready: true, businesses, places, message: null };
 }
 
 // supabase/functions/prospectai-worker/index.ts

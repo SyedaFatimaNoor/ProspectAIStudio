@@ -129,10 +129,14 @@ test("Overpass timeout is reported without claiming an empty result", async () =
         log: collected.log,
         fetch: async (_url, init) =>
           new Promise<Response>((_resolve, reject) => {
+            // AbortSignal.timeout uses an unref'd timer in Node. Keep this
+            // deterministic adapter alive until that abort is delivered.
+            const keepAlive = setInterval(() => undefined, 1_000);
             const signal = init?.signal as AbortSignal;
-            signal.addEventListener("abort", () =>
-              reject(new DOMException("Timed out", "TimeoutError")),
-            );
+            signal.addEventListener("abort", () => {
+              clearInterval(keepAlive);
+              reject(new DOMException("Timed out", "TimeoutError"));
+            });
           }),
       }),
     (error) => providerError(error, "timeout", null),

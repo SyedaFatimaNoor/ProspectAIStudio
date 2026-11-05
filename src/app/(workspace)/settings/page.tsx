@@ -56,7 +56,7 @@ const integrations = [
       "Community-maintained business listings with source attribution. No paid API key required.",
     icon: Globe2,
     env: "OVERPASS_URL=https://overpass-api.de/api/interpreter",
-    help: "Three free sources, and none of them needs a paid key. OSM_SNAPSHOT=1 searches an OpenStreetMap snapshot kept in the workspace database; build it once with npm run osm:snapshot -- --load, and it is the only source that also works on serverless hosting. OSM_EXTRACT_PATH reads a country .osm.pbf from download.geofabrik.de on disk and runs only in a locally started worker. OVERPASS_URL needs an endpoint that accepts your network. Respect ODbL attribution; listings are never evidence of current operation.",
+    help: "Three free sources, and none of them needs a paid key. OSM_SNAPSHOT=1 searches an OpenStreetMap extract imported into the workspace database; build it locally with npm run osm:snapshot -- --load --source-url=<exact extract URL>, and it is the only source that also works on serverless hosting. OSM_EXTRACT_PATH reads a country .osm.pbf from download.geofabrik.de on disk and runs only in a locally started worker. OVERPASS_URL needs an endpoint that accepts your network. Respect ODbL attribution; listings are never evidence of current operation.",
     url: "https://wiki.openstreetmap.org/wiki/Overpass_API",
   },
   {
@@ -112,23 +112,44 @@ function workerQuota(data: Workspace) {
   const worker = data.config.worker;
   if (!worker) return undefined;
   const remaining =
-    worker.daily_remaining ?? Math.max(worker.daily_limit - worker.daily_attempts, 0);
+    worker.daily_remaining ??
+    Math.max(worker.daily_limit - worker.daily_attempts, 0);
   return `${worker.daily_attempts}/${worker.daily_limit} used today (UTC); ${remaining} remaining`;
+}
+
+function snapshotDate(value: string | null | undefined) {
+  if (!value) return "unknown";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString();
 }
 
 function snapshotState(data: Workspace) {
   const snapshot = data.config.snapshot;
   if (!snapshot) return "Unavailable — snapshot migration is not installed";
   if (!snapshot.businesses || !snapshot.places)
-    return "Installed but empty — load a lawful, attributed OSM extract before enabling it";
-  return `${snapshot.businesses.toLocaleString()} businesses · ${snapshot.places.toLocaleString()} places · newest ${snapshot.newest_snapshot || "unknown"}`;
+    return "Warning — snapshot is empty. Load a lawful, attributed OSM extract before enabling discovery.";
+  if (snapshot.import_status && snapshot.import_status !== "ready")
+    return `Warning — snapshot import is ${snapshot.import_status}; discovery is blocked until a complete import succeeds.`;
+
+  const businesses = snapshot.businesses_imported ?? snapshot.businesses;
+  const places = snapshot.places_imported ?? snapshot.places;
+  const source = snapshot.source_name
+    ? ` · source ${snapshot.source_name}`
+    : "";
+  const dataset = snapshot.dataset_timestamp
+    ? ` · dataset ${snapshotDate(snapshot.dataset_timestamp)}`
+    : " · dataset timestamp unavailable";
+  return `${businesses.toLocaleString()} imported business records · ${places.toLocaleString()} places · last successful import ${snapshotDate(snapshot.last_successful_import_at)}${dataset}${source}`;
 }
 
-function healthTone(status: ProviderHealthRecord["status"]): IntegrationState["tone"] {
+function healthTone(
+  status: ProviderHealthRecord["status"],
+): IntegrationState["tone"] {
   if (status === "reachable") return "green";
   if (status === "rate_limited" || status === "paused" || status === "blocked")
     return "amber";
-  if (status === "not_configured" || status === "not_applicable") return "neutral";
+  if (status === "not_configured" || status === "not_applicable")
+    return "neutral";
   return "red";
 }
 
@@ -318,10 +339,14 @@ export default function Settings() {
       setCheckingAi(false);
     }
   }
-  async function testProviderConnection(provider: "database" | "discovery" | "worker") {
+  async function testProviderConnection(
+    provider: "database" | "discovery" | "worker",
+  ) {
     setCheckingProvider(provider);
     try {
-      const health = (await action("test_provider", { provider })) as ProviderHealthRecord;
+      const health = (await action("test_provider", {
+        provider,
+      })) as ProviderHealthRecord;
       notify(
         `${provider === "database" ? "Supabase" : provider === "discovery" ? "Discovery source" : "Worker"} check: ${healthStatusLabel(health.status)}${health.latency_ms !== null ? ` in ${health.latency_ms} ms` : ""}.`,
         health.status !== "reachable",
@@ -401,8 +426,12 @@ export default function Settings() {
                     )
                   : undefined;
               const healthProviders = [
-                ...(i.key === "database" || i.key === "discovery" ? [i.key] : []),
-                ...(i.key === "discovery" && data.config.worker ? ["worker"] : []),
+                ...(i.key === "database" || i.key === "discovery"
+                  ? [i.key]
+                  : []),
+                ...(i.key === "discovery" && data.config.worker
+                  ? ["worker"]
+                  : []),
               ] as ("database" | "discovery" | "worker")[];
               return (
                 <div className="integration-card" key={i.key}>
@@ -468,7 +497,11 @@ export default function Settings() {
                       <>
                         <div>
                           <dt>Last provider check</dt>
-                          <dd>{new Date(providerHealth.checked_at).toLocaleString()}</dd>
+                          <dd>
+                            {new Date(
+                              providerHealth.checked_at,
+                            ).toLocaleString()}
+                          </dd>
                         </div>
                         <div>
                           <dt>Health result</dt>
@@ -506,7 +539,9 @@ export default function Settings() {
                       <>
                         <div>
                           <dt>Last scheduler check</dt>
-                          <dd>{new Date(workerHealth.checked_at).toLocaleString()}</dd>
+                          <dd>
+                            {new Date(workerHealth.checked_at).toLocaleString()}
+                          </dd>
                         </div>
                         <div>
                           <dt>Scheduler result</dt>
@@ -516,7 +551,9 @@ export default function Settings() {
                           <div>
                             <dt>Last successful worker run</dt>
                             <dd>
-                              {new Date(workerHealth.last_success_at).toLocaleString()}
+                              {new Date(
+                                workerHealth.last_success_at,
+                              ).toLocaleString()}
                             </dd>
                           </div>
                         )}
@@ -574,10 +611,13 @@ export default function Settings() {
                         {checkingAi ? "Testing AI…" : "Test AI connection"}
                       </Button>
                       {aiHealth && (
-                        <div className="integration-health-result" role="status">
+                        <div
+                          className="integration-health-result"
+                          role="status"
+                        >
                           <strong>
-                            Actual reply · {aiHealth.provider} · {aiHealth.model} ·{" "}
-                            {aiHealth.latencyMs} ms
+                            Actual reply · {aiHealth.provider} ·{" "}
+                            {aiHealth.model} · {aiHealth.latencyMs} ms
                           </strong>
                           <p>{aiHealth.reply}</p>
                         </div>
@@ -746,12 +786,15 @@ export default function Settings() {
               )}
               {profileSavedAt && !profileDirty && (
                 <p className="field-help" role="status">
-                  Profile saved successfully · {new Date(profileSavedAt).toLocaleString()}.
+                  Profile saved successfully ·{" "}
+                  {new Date(profileSavedAt).toLocaleString()}.
                 </p>
               )}
               <Button
                 disabled={
-                  profileSaving || !profileDirty || !displayNameValidation.success
+                  profileSaving ||
+                  !profileDirty ||
+                  !displayNameValidation.success
                 }
                 onClick={async () => {
                   setProfileSaving(true);
@@ -759,7 +802,9 @@ export default function Settings() {
                     const profile = (await action("save_profile", {
                       display_name: displayName,
                     })) as { updated_at?: string };
-                    setProfileSavedAt(profile.updated_at || new Date().toISOString());
+                    setProfileSavedAt(
+                      profile.updated_at || new Date().toISOString(),
+                    );
                     notify("Profile saved successfully.");
                   } catch {
                     // WorkspaceProvider shows the controlled error notification.

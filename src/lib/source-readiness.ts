@@ -3,6 +3,8 @@ export type SnapshotStatus = {
   places?: unknown;
   oldest_snapshot?: unknown;
   newest_snapshot?: unknown;
+  import_status?: unknown;
+  last_import_error?: unknown;
 };
 
 export type SnapshotReadiness = {
@@ -31,13 +33,42 @@ export function snapshotReadiness(value: unknown): SnapshotReadiness {
       : null;
   const businesses = count(status?.businesses);
   const places = count(status?.places);
-  if (businesses > 0 && places > 0)
-    return { ready: true, businesses, places, message: null };
-  return {
-    ready: false,
-    businesses,
-    places,
-    message:
-      "The OpenStreetMap snapshot is enabled but has no searchable places or businesses. Load a lawful, attributed extract and validate one bounded search while scheduling remains paused. No search was run.",
-  };
+  const importState =
+    status?.import_status === undefined
+      ? null
+      : typeof status.import_status === "string"
+        ? status.import_status
+        : "unknown";
+
+  // The import-state field is added by the provenance migration. Keep older
+  // deployed schemas readable, but once it exists a partial/failed import is
+  // never allowed to serve a discovery job, even if its first chunks loaded.
+  if (importState && importState !== "ready" && importState !== "empty") {
+    const detail =
+      typeof status?.last_import_error === "string" && status.last_import_error
+        ? ` ${status.last_import_error.slice(0, 180)}`
+        : "";
+    return {
+      ready: false,
+      businesses,
+      places,
+      message: `The OpenStreetMap snapshot import is ${importState}, not ready. Discovery remains blocked until a complete lawful import records its provenance.${detail}`,
+    };
+  }
+  if (!businesses || !places)
+    return {
+      ready: false,
+      businesses,
+      places,
+      message:
+        "The OpenStreetMap snapshot is enabled but has no searchable places or businesses (the snapshot is empty). Load a lawful, attributed extract and validate one bounded search while scheduling remains paused. No search was run.",
+    };
+  if (importState && importState !== "ready")
+    return {
+      ready: false,
+      businesses,
+      places,
+      message: `The OpenStreetMap snapshot import is ${importState}, not ready. Discovery remains blocked until a complete lawful import records its provenance.`,
+    };
+  return { ready: true, businesses, places, message: null };
 }

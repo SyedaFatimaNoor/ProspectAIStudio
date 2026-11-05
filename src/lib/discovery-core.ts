@@ -613,7 +613,7 @@ export async function discoverOsmSnapshot(
         attribution: "© OpenStreetMap contributors, ODbL",
         observed_at: new Date().toISOString(),
         website_link: website,
-        source_format: `OpenStreetMap snapshot dated ${row.snapshot_date}`,
+        source_format: `OpenStreetMap snapshot record dated ${row.snapshot_date}`,
         distance_km: row.distance_km,
         activity_note:
           "Snapshot listing. Listing edits are not evidence of current business operation.",

@@ -4,6 +4,12 @@ begin;
 do $$
 declare n int; hits jsonb; first text; city_id bigint;
 begin
+ perform public.pa_osm_snapshot_begin_import(
+   'QA OpenStreetMap fixture',
+   'https://example.invalid/qa-test.osm.pbf',
+   '© OpenStreetMap contributors, Open Database License (ODbL)',
+   '2026-10-30T00:00:00Z'::timestamptz
+ );
  n := public.pa_osm_load_places('[
    {"id":900001,"kind":"node","name":"QA Test Karachi","name_en":null,"place":"city","country_code":"QA-Test-Land","lat":24.86,"lon":67.01,"rank":4},
    {"id":900002,"kind":"node","name":"QA Test Clifton","name_en":null,"place":"suburb","country_code":"QA-Test-Land","lat":24.81,"lon":67.03,"rank":2},
@@ -50,6 +56,28 @@ begin
  -- An unknown city returns no rows, which the source adapter reports as a failure.
  if (select count(*) from public.pa_osm_search('QA-Test-Land','QA Test Nowhere','cafe',100)) <> 0 then
    raise exception 'Unknown city matched something';
+ end if;
+
+ -- A repeated source row updates its typed OSM identity rather than adding a
+ -- duplicate. A way may still legitimately use the same numeric ID as a node.
+ n := public.pa_osm_load_businesses('[
+   {"id":910001,"kind":"node","osm_type_id":"node/910001","category_key":"amenity","category_value":"cafe","app_category":"cafe","name":"QA Test Cafe Near","phone":"+92 300 0000000","email":null,"website":"cafe.example","street":"Test Street","housenumber":"1","locality":"QA Test Karachi","country_code":"QA-Test-Land","lat":24.87,"lon":67.02,"place_ids":[900001,900002],"edit_at":"1761800000","snapshot_date":"2026-10-30"}
+ ]'::jsonb);
+ if n <> 1 or (select count(*) from public.pa_osm_businesses where osm_type_id='node/910001') <> 1 then
+   raise exception 'Repeated typed OSM row created a duplicate';
+ end if;
+ n := public.pa_osm_load_businesses('[
+   {"id":910001,"kind":"way","osm_type_id":"way/910001","category_key":"amenity","category_value":"cafe","app_category":"cafe","name":"QA Test Cafe Way","phone":null,"email":null,"website":null,"street":null,"housenumber":null,"locality":"QA Test Karachi","country_code":"QA-Test-Land","lat":24.875,"lon":67.025,"place_ids":[900001],"snapshot_date":"2026-10-30"}
+ ]'::jsonb);
+ if (select count(*) from public.pa_osm_businesses where id=910001) <> 2 then
+   raise exception 'Typed OSM identities collapsed distinct element types';
+ end if;
+
+ perform public.pa_osm_snapshot_complete_import(3,4);
+ if public.pa_osm_snapshot_status() ->> 'import_status' <> 'ready'
+    or public.pa_osm_snapshot_status() ->> 'source_name' <> 'QA OpenStreetMap fixture'
+    or public.pa_osm_snapshot_status() ->> 'businesses_imported' <> '4' then
+   raise exception 'Snapshot import provenance/status is unusable';
  end if;
 
  -- Loading is service-role only; the search is usable by a signed-in workspace.
