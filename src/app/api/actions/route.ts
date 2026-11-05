@@ -12,6 +12,11 @@ import {
 } from "@/lib/validation";
 import { CompatibleAI } from "@/lib/ai";
 import {
+  checkProviderHealth,
+  healthProviderSchema,
+  type ProviderHealth,
+} from "@/lib/provider-health";
+import {
   discoverySourceConfigured,
   localSourceOnly,
 } from "@/lib/discovery";
@@ -76,18 +81,19 @@ export async function POST(req: NextRequest) {
       .object({ type: z.string().trim().min(1) })
       .parse(input).type;
     const user_id = user.id;
-    if (type === "test_ai") {
-      const aiRate = takeRateLimit(`ai-health:${user_id}`, {
-        limit: 3,
-        windowMs: 5 * 60_000,
-      });
-      if (!aiRate.allowed)
+    if (type === "test_ai" || type === "test_provider") {
+      const checkedProvider =
+        type === "test_ai" ? "ai" : z.string().trim().max(40).parse(input.provider);
+      const healthRate = takeRateLimit(
+        `provider-health:${user_id}:${checkedProvider}`,
+        { limit: 3, windowMs: 5 * 60_000 },
+      );
+      if (!healthRate.allowed)
         return NextResponse.json(
           {
-            error:
-              "AI connection tests are limited to 3 per 5 minutes. Please wait before retrying.",
+            error: `Provider health checks for ${checkedProvider} are limited to 3 per 5 minutes. Please wait before retrying.`,
           },
-          { status: 429, headers: rateLimitHeaders(aiRate) },
+          { status: 429, headers: rateLimitHeaders(healthRate) },
         );
     }
     async function insert(table: string, values: Record<string, unknown>) {
@@ -131,6 +137,29 @@ export async function POST(req: NextRequest) {
       detail: Record<string, unknown> = {},
     ) {
       await insert("audit_logs", { action: type, entity_id, detail });
+    }
+    async function saveProviderHealth(health: ProviderHealth) {
+      const { data: prior, error: priorError } = await db!
+        .from("pa_provider_health")
+        .select("last_success_at")
+        .eq("user_id", user_id)
+        .eq("provider", health.provider)
+        .maybeSingle();
+      if (priorError) throw new Error(`Unable to read provider health: ${priorError.message}`);
+      const { data: saved, error } = await db!
+        .from("pa_provider_health")
+        .upsert(
+          {
+            user_id,
+            ...health,
+            last_success_at: health.last_success_at || prior?.last_success_at || null,
+          },
+          { onConflict: "user_id,provider" },
+        )
+        .select()
+        .single();
+      if (error) throw new Error(`Unable to save provider health: ${error.message}`);
+      return saved;
     }
     let result: unknown = { ok: true };
     switch (type) {
@@ -385,16 +414,65 @@ export async function POST(req: NextRequest) {
         await audit(b.id);
         break;
       }
-      case "test_ai": {
-        const health = await new CompatibleAI().healthCheck();
-        // Keep the model response out of the audit log. It is shown only to the
-        // requesting signed-in operator and is not business evidence.
+      case "test_provider": {
+        const provider = z.enum(healthProviderSchema).parse(input.provider);
+        const health = await checkProviderHealth(provider, db);
+        const saved = await saveProviderHealth(health);
         await audit(null, {
-          provider: health.provider,
-          model: health.model,
-          latency_ms: health.latencyMs,
+          provider,
+          status: saved.status,
+          latency_ms: saved.latency_ms,
         });
-        result = health;
+        result = saved;
+        break;
+      }
+      case "test_ai": {
+        const started = Date.now();
+        try {
+          const health = await new CompatibleAI().healthCheck();
+          const saved = await saveProviderHealth({
+            provider: "ai",
+            status: "reachable",
+            checked_at: new Date().toISOString(),
+            last_success_at: new Date().toISOString(),
+            latency_ms: health.latencyMs,
+            last_error: null,
+            recommended_action:
+              "AI is reachable. Review generated drafts before using or exporting them.",
+          });
+          // Keep the model response out of the audit log and provider-health
+          // row. It is shown only to the requesting signed-in operator and is
+          // not business evidence.
+          await audit(null, {
+            provider: health.provider,
+            model: health.model,
+            latency_ms: health.latencyMs,
+            status: saved.status,
+          });
+          result = health;
+        } catch (cause) {
+          const message =
+            cause instanceof Error
+              ? cause.message
+              : "AI provider health check failed.";
+          const status = /rate limit|\(429\)/i.test(message)
+            ? "rate_limited"
+            : "unreachable";
+          await saveProviderHealth({
+            provider: "ai",
+            status,
+            checked_at: new Date().toISOString(),
+            last_success_at: null,
+            latency_ms: Date.now() - started,
+            last_error: message.slice(0, 500),
+            recommended_action:
+              status === "rate_limited"
+                ? "Wait for the provider's stated retry window before testing again."
+                : "Check the server-only provider key, model, endpoint, and provider status.",
+          });
+          await audit(null, { provider: "ai", status });
+          throw cause;
+        }
         break;
       }
       case "save_message": {
@@ -507,10 +585,14 @@ export async function POST(req: NextRequest) {
       }
       case "save_profile": {
         const display_name = displayNameSchema.parse(input.display_name);
-        const { error } = await db
+        const { data: profile, error } = await db
           .from("pa_profiles")
-          .upsert({ id: user_id, display_name });
+          .upsert({ id: user_id, display_name })
+          .select("display_name,updated_at")
+          .single();
         if (error) throw error;
+        result = profile;
+        await audit(user_id, { field: "display_name" });
         break;
       }
       case "purge_expired": {

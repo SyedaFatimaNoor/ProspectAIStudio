@@ -22,7 +22,20 @@ export function WorkspaceOnboarding() {
   }
   if (loading)
     return (
-      <div className="onboarding-loading">Loading workspace requirements…</div>
+      <aside
+        className="onboarding-loading"
+        aria-busy="true"
+        aria-label="Loading workspace requirements"
+      >
+        <span className="sr-only">Loading workspace requirements…</span>
+        <div className="onboarding-loading-head" aria-hidden="true" />
+        <div className="onboarding-loading-copy" aria-hidden="true" />
+        <div className="onboarding-loading-steps" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+      </aside>
     );
   if (connectionError)
     return (

@@ -76,6 +76,10 @@ export default function Discovery() {
   const blockedReason = discoveryBlockReason(data, loading, connectionError);
   const workerPaused = workerIsKnownPaused(data.config.worker);
   const selfHostedRunner = Boolean(data.config.self_hosted_worker);
+  const discoveryUnavailable = Boolean(blockedReason);
+  const lastWorkerActivity = data.config.worker?.last_finished_at || null;
+  const lastSuccessfulWorkerRun = data.config.worker?.last_successful_at || null;
+  const lastWorkerOutcome = data.config.worker?.last_error || null;
   const set = (key: string, value: unknown) => {
     setForm((f) => ({ ...f, [key]: value }));
     setSubmissionError(null);
@@ -150,10 +154,25 @@ export default function Discovery() {
           </Notice>
         ) : (
           <Notice tone="error">
-            Cloud discovery is paused, so new searches are blocked. The operator
+            <strong>Worker paused — discovery unavailable.</strong> The operator
             must resolve the provider/setup issue before re-enabling the
             scheduler. Existing queued jobs are shown as blocked below; no source
-            results are fabricated.{" "}
+            results are fabricated.
+            {lastWorkerActivity && (
+              <>
+                {" "}Last worker activity: {formatDate(lastWorkerActivity)}.
+              </>
+            )}
+            {lastSuccessfulWorkerRun && (
+              <>
+                {" "}Last successful worker run: {formatDate(lastSuccessfulWorkerRun)}.
+              </>
+            )}
+            {lastWorkerOutcome && (
+              <>
+                {" "}Last recorded outcome: {lastWorkerOutcome}
+              </>
+            )}{" "}
             <Link href="/settings">View setup instructions</Link>.
           </Notice>
         ))}
@@ -392,13 +411,17 @@ export default function Discovery() {
               </span>
               <Button
                 type="submit"
-                disabled={busy || Boolean(blockedReason)}
+                disabled={busy || discoveryUnavailable}
                 aria-describedby={
-                  blockedReason ? "discovery-unavailable" : undefined
+                  discoveryUnavailable ? "discovery-unavailable" : undefined
                 }
               >
                 {busy ? <Spinner /> : <Compass size={16} />}
-                {busy ? "Queuing discovery…" : "Start discovery"}
+                {busy
+                  ? "Queuing discovery…"
+                  : discoveryUnavailable
+                    ? "Discovery unavailable"
+                    : "Start discovery"}
                 <ArrowRight size={16} />
               </Button>
             </div>
@@ -490,6 +513,16 @@ export default function Discovery() {
             {data.jobs.map((j) => {
               const jobBlocked =
                 workerPaused && !selfHostedRunner && j.status === "queued";
+              const rateLimited = Boolean(j.error?.match(/HTTP 429|rate limit/i));
+              const retryScheduled =
+                j.status === "queued" && Boolean(j.error) && !jobBlocked;
+              const statusLabel = jobBlocked
+                ? "Blocked — worker unavailable"
+                : rateLimited
+                  ? "Rate limited"
+                  : retryScheduled
+                    ? "Queued for retry"
+                    : j.status;
               return (
                 <div className="job-card" key={j.id}>
                   <div className="job-row">
@@ -502,20 +535,24 @@ export default function Discovery() {
                         {j.country}
                       </strong>
                       <small>
-                        OpenStreetMap · {formatDate(j.created_at)} ·{" "}
-                        {j.processed} / {j.total || j.max_results} processed
+                        Job {j.id.slice(0, 8)} · {j.provider || "OpenStreetMap"} ·{" "}
+                        created {formatDate(j.created_at)} · {j.processed} /{" "}
+                        {j.total || j.max_results} source records processed
+                        {typeof j.attempts === "number" ? ` · attempt ${j.attempts}/3` : ""}
                       </small>
                     </div>
                     <Badge
                       tone={
                         jobBlocked || j.status === "failed"
                           ? "red"
-                          : j.status === "completed"
-                            ? "green"
-                            : "blue"
+                          : rateLimited
+                            ? "amber"
+                            : j.status === "completed"
+                              ? "green"
+                              : "blue"
                       }
                     >
-                      {jobBlocked ? "Blocked — worker unavailable" : j.status}
+                      {statusLabel}
                     </Badge>
                     <div className="job-controls">
                       {!jobBlocked &&
@@ -577,9 +614,19 @@ export default function Discovery() {
                     </Notice>
                   )}
                   {j.error && (
-                    <Notice tone="error">
+                    <Notice tone={rateLimited ? "info" : "error"}>
                       {discoveryJobErrorMessage(j.error)}
                     </Notice>
+                  )}
+                  {retryScheduled && (
+                    <Notice>
+                      {j.next_retry_at
+                        ? `Automatic retry is scheduled no earlier than ${formatDate(j.next_retry_at)}. It remains bounded to three attempts.`
+                        : "Automatic retry is pending. It remains bounded to three attempts."}
+                    </Notice>
+                  )}
+                  {j.updated_at && (
+                    <p className="job-meta">Last job update: {formatDate(j.updated_at)}.</p>
                   )}
                   {expanded === j.id && (
                     <div className="job-logs">

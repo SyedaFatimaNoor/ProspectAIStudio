@@ -32,6 +32,10 @@ export type Job = {
   error: string | null;
   logs: string[];
   created_at: string;
+  provider?: string;
+  attempts?: number;
+  next_retry_at?: string | null;
+  updated_at?: string;
 };
 export type Proposal = {
   id: string;
@@ -68,8 +72,24 @@ export type Run = {
   created_at: string;
   error: string | null;
 };
+export type ProviderHealthRecord = {
+  provider: "database" | "discovery" | "worker" | "ai" | "email" | "whatsapp";
+  status:
+    | "reachable"
+    | "paused"
+    | "blocked"
+    | "not_configured"
+    | "not_applicable"
+    | "unreachable"
+    | "rate_limited";
+  checked_at: string;
+  last_success_at: string | null;
+  latency_ms: number | null;
+  last_error: string | null;
+  recommended_action: string;
+};
 export type Workspace = {
-  user: { id: string; email?: string; display_name?: string } | null;
+  user: { id: string; email?: string; display_name?: string; updated_at?: string } | null;
   businesses: Business[];
   jobs: Job[];
   proposals: Proposal[];
@@ -82,6 +102,7 @@ export type Workspace = {
     detail?: string;
     created_at?: string;
   }[];
+  provider_health: ProviderHealthRecord[];
   settings: {
     search_limit: number;
     verification_threshold: number;
@@ -107,6 +128,7 @@ export type Workspace = {
       interval_minutes: number;
       last_started_at: string | null;
       last_finished_at: string | null;
+      last_successful_at?: string | null;
       last_error?: string | null;
     };
   };
@@ -122,6 +144,7 @@ export const emptyWorkspace: Workspace = {
   runs: [],
   suppressions: [],
   events: [],
+  provider_health: [],
   settings: null,
   config: { database: false, discovery: false, ai: false },
 };

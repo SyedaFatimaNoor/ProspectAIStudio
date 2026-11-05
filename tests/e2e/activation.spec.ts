@@ -14,7 +14,9 @@ async function workspace(page: Page, patch: Partial<Workspace> = {}) {
   return state;
 }
 const start = (page: Page) =>
-  page.getByRole("button", { name: "Start discovery", exact: true });
+  page.getByRole("button", {
+    name: /^(Start discovery|Discovery unavailable)$/,
+  });
 const city = (page: Page) =>
   page.getByRole("textbox", { name: "City", exact: true });
 const country = (page: Page) =>

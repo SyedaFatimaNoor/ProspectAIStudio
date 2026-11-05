@@ -67,6 +67,25 @@ source result. A status of **blocked** is not a completed finding.
 | R-12 worker dashboard | Settings now exposes scheduler state, quota, last activity/outcome, and snapshot readiness. A dedicated external status/alert service remains optional operator infrastructure. |
 | R-13 onboarding | The existing workspace onboarding checklist explains account, source/worker, bounded search, and evidence steps without adding fictional sample records. |
 
+## Complete website audit addendum — 5 November 2026
+
+The later browser-only report uses PAI identifiers. The register below keeps its
+findings tied to source and production evidence rather than treating a rendered
+empty state as a completed data workflow.
+
+| ID | Current disposition |
+| --- | --- |
+| PAI-001 / PAI-003 | **Blocked safely.** Production reports a paused worker after a real HTTP 406; snapshot counts remain zero. No worker enable, endpoint rotation, fabricated job, or synthetic lead is used to make discovery appear live. |
+| PAI-002 | **Implemented.** Blocked primary action is disabled and labelled **Discovery unavailable**, with worker state, last activity/outcome, and setup link beside the form. |
+| PAI-004 | **Implemented; real operator invocation pending.** Authenticated operator checks now persist current result, check time, last success, latency, bounded error, and recommended action for Supabase, discovery, worker, and AI. A health check never queues a job or enables a worker. |
+| PAI-005 / PAI-006 | **Fixture-tested; real-data validation blocked.** Studio and draft-only outreach journeys are browser-tested with explicitly intercepted test records. A production journey must wait for a permitted discovery result. |
+| PAI-007 | **Intentional SEO policy.** `/`, `/privacy`, and `/responsible-use` are the canonical public documents. Workspace, sign-in, and reset routes are user-specific or account operations and remain noindex/out of the sitemap. `/home` is an alias, not a second canonical page. |
+| PAI-008 | **Implemented.** First-run loading uses a labelled, reduced-motion-aware skeleton instead of a persistent generic sentence; connection failures retain the retry control. |
+| PAI-009 | **Implemented.** Profile save has saving, success, error-notification, validation, last-saved, and unsaved-change states. |
+| PAI-010 | **Automated viewport coverage added.** Playwright checks key workspace routes for horizontal overflow at 320, 375, 414, 768, 1024, and 1440px; keyboard/axe coverage remains in the suite. Manual assistive-technology review is still an operator QA task. |
+| PAI-011 | **Direct RLS regression passed transactionally.** Test-only, rolled-back account A/B fixtures verified cross-tenant business/job/draft read, update, delete, relation, and export-scope denial, plus existing mutation guards. The regression now also covers each account's persisted provider-health record. A browser two-real-account run after discovery is still required before onboarding live users. |
+| PAI-012 | **Baseline implemented, not overstated.** Per-runtime API/action/AI limits, job caps, leases, bounded retries, and permanent rejection pause exist. A distributed limiter/monitoring service, backup policy, restore drill, and alert destination require authorised operator infrastructure. |
+
 ## Snapshot activation runbook (operator only)
 
 Do **all** of the following before considering discovery restored:
