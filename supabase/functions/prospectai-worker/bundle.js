@@ -613,7 +613,15 @@ function databaseClient(env, deadline) {
           signal: AbortSignal.any([deadline, AbortSignal.timeout(2e4)])
         }
       );
-      const data = await response.json();
+      const body = await response.text();
+      let data = null;
+      if (body) {
+        try {
+          data = JSON.parse(body);
+        } catch {
+          data = null;
+        }
+      }
       return response.ok ? { data, error: null } : {
         data: null,
         error: {
@@ -798,5 +806,6 @@ if (typeof Deno !== "undefined")
   Deno.serve(createWorkerHandler({ env: Deno.env }));
 export {
   createWorkerHandler,
+  databaseClient,
   validWorkerToken
 };
