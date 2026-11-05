@@ -87,6 +87,7 @@ export async function GET(req: NextRequest) {
       messages: "outreach_messages",
       runs: "verification_runs",
       suppressions: "suppression_records",
+      audit_logs: "audit_logs",
       events: "outreach_events",
       settings: "integration_settings",
     };

@@ -7191,3 +7191,67 @@ textarea {
     margin-right: 15px;
   }
 }
+
+.outreach-audit-log {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px 20px;
+}
+.outreach-audit-log > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.outreach-audit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcfe;
+  color: var(--muted);
+}
+.outreach-audit-row > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.outreach-audit-row strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+.outreach-audit-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.outreach-gate .notice {
+  align-items: flex-start;
+}
+.outreach-gate-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 3px;
+  font-weight: 650;
+}
+.personalisation-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  border-color: #cfd8ee;
+  color: #29499b;
+  font-weight: 650;
+}
+@media (max-width: 640px) {
+  .outreach-audit-log {
+    padding: 14px 15px 16px;
+  }
+  .personalisation-action {
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
+  }
+}
