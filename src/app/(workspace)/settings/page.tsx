@@ -35,7 +35,7 @@ import { browserSupabase } from "@/lib/browser-supabase";
 import { workerIsKnownPaused } from "@/lib/cloud-worker";
 import { displayNameSchema } from "@/lib/validation";
 import type { AIHealth } from "@/lib/ai";
-import type { Workspace } from "@/lib/types";
+import type { ProviderHealthRecord, Workspace } from "@/lib/types";
 const integrations = [
   {
     key: "database",
@@ -104,6 +104,7 @@ type IntegrationState = {
   quota?: string;
   snapshot?: string;
   lastActivity?: string | null;
+  lastSuccessful?: string | null;
   lastError?: string | null;
 };
 
@@ -121,6 +122,18 @@ function snapshotState(data: Workspace) {
   if (!snapshot.businesses || !snapshot.places)
     return "Installed but empty — load a lawful, attributed OSM extract before enabling it";
   return `${snapshot.businesses.toLocaleString()} businesses · ${snapshot.places.toLocaleString()} places · newest ${snapshot.newest_snapshot || "unknown"}`;
+}
+
+function healthTone(status: ProviderHealthRecord["status"]): IntegrationState["tone"] {
+  if (status === "reachable") return "green";
+  if (status === "rate_limited" || status === "paused" || status === "blocked")
+    return "amber";
+  if (status === "not_configured" || status === "not_applicable") return "neutral";
+  return "red";
+}
+
+function healthStatusLabel(status: ProviderHealthRecord["status"]) {
+  return status.replaceAll("_", " ");
 }
 
 function integrationState(
@@ -201,6 +214,7 @@ function integrationState(
       snapshot: snapshotState(data),
       quota: workerQuota(data),
       lastActivity: data.config.worker?.last_finished_at,
+      lastSuccessful: data.config.worker?.last_successful_at,
       lastError: data.config.worker?.last_error,
     };
   if (key === "discovery" && data.config.worker?.enabled)
@@ -214,6 +228,7 @@ function integrationState(
       snapshot: snapshotState(data),
       quota: workerQuota(data),
       lastActivity: data.config.worker.last_finished_at,
+      lastSuccessful: data.config.worker.last_successful_at,
       lastError: data.config.worker.last_error,
     };
   return {
@@ -231,6 +246,7 @@ function integrationState(
           snapshot: snapshotState(data),
           quota: workerQuota(data),
           lastActivity: data.config.worker?.last_finished_at,
+          lastSuccessful: data.config.worker?.last_successful_at,
           lastError: data.config.worker?.last_error,
         }
       : {}),
@@ -247,12 +263,17 @@ export default function Settings() {
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [checkingAi, setCheckingAi] = useState(false);
+  const [checkingProvider, setCheckingProvider] = useState<string | null>(null);
   const [aiHealth, setAiHealth] = useState<AIHealth | null>(null);
   const [displayName, setDisplayName] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSavedAt, setProfileSavedAt] = useState<string | null>(null);
   const displayNameValidation = displayNameSchema.safeParse(displayName);
+  const profileDirty = displayName !== (data.user?.display_name || "");
   useEffect(() => {
     setDisplayName(data.user?.display_name || "");
-  }, [data.user?.display_name]);
+    setProfileSavedAt(data.user?.updated_at || null);
+  }, [data.user?.display_name, data.user?.updated_at]);
   const [form, setForm] = useState({
     search_limit: 25,
     verification_threshold: 85,
@@ -295,6 +316,20 @@ export default function Settings() {
       // WorkspaceProvider already presents the server's controlled error.
     } finally {
       setCheckingAi(false);
+    }
+  }
+  async function testProviderConnection(provider: "database" | "discovery" | "worker") {
+    setCheckingProvider(provider);
+    try {
+      const health = (await action("test_provider", { provider })) as ProviderHealthRecord;
+      notify(
+        `${provider === "database" ? "Supabase" : provider === "discovery" ? "Discovery source" : "Worker"} check: ${healthStatusLabel(health.status)}${health.latency_ms !== null ? ` in ${health.latency_ms} ms` : ""}.`,
+        health.status !== "reachable",
+      );
+    } catch {
+      // WorkspaceProvider already presents the controlled server-side error.
+    } finally {
+      setCheckingProvider(null);
     }
   }
   return (
@@ -356,6 +391,19 @@ export default function Settings() {
                 loading,
                 connectionError,
               );
+              const providerHealth = data.provider_health.find(
+                (health) => health.provider === i.key,
+              );
+              const workerHealth =
+                i.key === "discovery"
+                  ? data.provider_health.find(
+                      (health) => health.provider === "worker",
+                    )
+                  : undefined;
+              const healthProviders = [
+                ...(i.key === "database" || i.key === "discovery" ? [i.key] : []),
+                ...(i.key === "discovery" && data.config.worker ? ["worker"] : []),
+              ] as ("database" | "discovery" | "worker")[];
               return (
                 <div className="integration-card" key={i.key}>
                   <div className="integration-card-top">
@@ -402,13 +450,118 @@ export default function Settings() {
                         </dd>
                       </div>
                     )}
+                    {status.lastSuccessful && (
+                      <div>
+                        <dt>Last successful worker run</dt>
+                        <dd>
+                          {new Date(status.lastSuccessful).toLocaleString()}
+                        </dd>
+                      </div>
+                    )}
                     {status.lastError && (
                       <div>
                         <dt>Last worker outcome</dt>
                         <dd>{status.lastError}</dd>
                       </div>
                     )}
+                    {providerHealth && (
+                      <>
+                        <div>
+                          <dt>Last provider check</dt>
+                          <dd>{new Date(providerHealth.checked_at).toLocaleString()}</dd>
+                        </div>
+                        <div>
+                          <dt>Health result</dt>
+                          <dd>{healthStatusLabel(providerHealth.status)}</dd>
+                        </div>
+                        {providerHealth.last_success_at && (
+                          <div>
+                            <dt>Last successful check</dt>
+                            <dd>
+                              {new Date(
+                                providerHealth.last_success_at,
+                              ).toLocaleString()}
+                            </dd>
+                          </div>
+                        )}
+                        {providerHealth.latency_ms !== null && (
+                          <div>
+                            <dt>Response time</dt>
+                            <dd>{providerHealth.latency_ms} ms</dd>
+                          </div>
+                        )}
+                        {providerHealth.last_error && (
+                          <div>
+                            <dt>Last health error</dt>
+                            <dd>{providerHealth.last_error}</dd>
+                          </div>
+                        )}
+                        <div>
+                          <dt>Recommended action</dt>
+                          <dd>{providerHealth.recommended_action}</dd>
+                        </div>
+                      </>
+                    )}
+                    {workerHealth && (
+                      <>
+                        <div>
+                          <dt>Last scheduler check</dt>
+                          <dd>{new Date(workerHealth.checked_at).toLocaleString()}</dd>
+                        </div>
+                        <div>
+                          <dt>Scheduler result</dt>
+                          <dd>{healthStatusLabel(workerHealth.status)}</dd>
+                        </div>
+                        {workerHealth.last_success_at && (
+                          <div>
+                            <dt>Last successful worker run</dt>
+                            <dd>
+                              {new Date(workerHealth.last_success_at).toLocaleString()}
+                            </dd>
+                          </div>
+                        )}
+                        {workerHealth.last_error && (
+                          <div>
+                            <dt>Last scheduler check error</dt>
+                            <dd>{workerHealth.last_error}</dd>
+                          </div>
+                        )}
+                        <div>
+                          <dt>Scheduler guidance</dt>
+                          <dd>{workerHealth.recommended_action}</dd>
+                        </div>
+                      </>
+                    )}
                   </dl>
+                  {providerHealth && (
+                    <Badge tone={healthTone(providerHealth.status)}>
+                      Last check: {healthStatusLabel(providerHealth.status)}
+                    </Badge>
+                  )}
+                  {healthProviders.length > 0 && data.user && (
+                    <div className="integration-health">
+                      {healthProviders.map((provider) => (
+                        <Button
+                          key={provider}
+                          variant="outline"
+                          size="sm"
+                          disabled={checkingProvider !== null}
+                          onClick={() => void testProviderConnection(provider)}
+                        >
+                          {checkingProvider === provider ? (
+                            <Spinner />
+                          ) : (
+                            <RefreshCw size={14} />
+                          )}
+                          {checkingProvider === provider
+                            ? "Checking provider…"
+                            : provider === "worker"
+                              ? "Check worker status"
+                              : "Test provider connection"}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                   {i.key === "ai" && status.configured && data.user && (
                     <div className="integration-health">
                       <Button
@@ -586,17 +739,37 @@ export default function Settings() {
                   placeholder="Your name"
                 />
               </Field>
+              {profileDirty && (
+                <p className="field-help" role="status">
+                  You have unsaved profile changes.
+                </p>
+              )}
+              {profileSavedAt && !profileDirty && (
+                <p className="field-help" role="status">
+                  Profile saved successfully · {new Date(profileSavedAt).toLocaleString()}.
+                </p>
+              )}
               <Button
-                disabled={!displayNameValidation.success}
+                disabled={
+                  profileSaving || !profileDirty || !displayNameValidation.success
+                }
                 onClick={async () => {
+                  setProfileSaving(true);
                   try {
-                    await action("save_profile", { display_name: displayName });
-                    notify("Profile updated.");
-                  } catch {}
+                    const profile = (await action("save_profile", {
+                      display_name: displayName,
+                    })) as { updated_at?: string };
+                    setProfileSavedAt(profile.updated_at || new Date().toISOString());
+                    notify("Profile saved successfully.");
+                  } catch {
+                    // WorkspaceProvider shows the controlled error notification.
+                  } finally {
+                    setProfileSaving(false);
+                  }
                 }}
               >
-                <Save size={15} />
-                Save profile
+                {profileSaving ? <Spinner /> : <Save size={15} />}
+                {profileSaving ? "Saving profile…" : "Save profile"}
               </Button>
             </div>
           </Panel>

@@ -4,6 +4,7 @@ import {
   emptyWorkspace,
   type Workspace,
   type Business,
+  type ProviderHealthRecord,
 } from "../../src/lib/types";
 // Test-only HTTP fixtures. These are never bundled into application code or inserted into the live database.
 const id = "bf4941be-e03a-454b-905c-ae57c247e8e3";
@@ -118,6 +119,28 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
           json: { error: "Sending is disabled." },
         });
         return;
+      case "test_provider": {
+        const provider = v.provider as "database" | "discovery" | "worker";
+        const health: ProviderHealthRecord = {
+          provider,
+          status: provider === "worker" ? "paused" : "reachable",
+          checked_at: "2026-11-05T09:00:00.000Z",
+          last_success_at:
+            provider === "worker" ? null : "2026-11-05T09:00:00.000Z",
+          latency_ms: 31,
+          last_error: provider === "worker" ? "TEST ONLY — worker paused" : null,
+          recommended_action:
+            provider === "worker"
+              ? "TEST ONLY — configure a permitted source before enabling."
+              : "TEST ONLY — no action needed.",
+        };
+        state.provider_health = [
+          ...state.provider_health.filter((row) => row.provider !== provider),
+          health,
+        ];
+        await route.fulfill({ json: health });
+        return;
+      }
       case "test_ai":
         await route.fulfill({
           json: {
@@ -192,6 +215,25 @@ test("sign in exposes accessible account recovery and explains an expired callba
   await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Send reset instructions" })).toBeVisible();
 });
+test("settings records a bounded provider health check with an actionable result", async ({
+  page,
+}) => {
+  await mocked(page, {
+    config: { database: true, discovery: true, ai: false },
+  });
+  await page.goto("/settings");
+  const card = page
+    .locator(".integration-card")
+    .filter({ has: page.getByRole("heading", { name: "Supabase" }) });
+  await card
+    .getByRole("button", { name: "Test provider connection", exact: true })
+    .click();
+  await expect(card).toContainText("Last provider check");
+  await expect(card).toContainText("reachable");
+  await expect(card).toContainText("Response time");
+  await expect(card).toContainText("TEST ONLY — no action needed.");
+});
+
 test("AI settings health check shows only a returned provider reply", async ({
   page,
 }) => {
@@ -220,7 +262,7 @@ test("real unconfigured discovery is disabled and never reports success", async 
   await page.getByLabel("Country", { exact: true }).fill("Pakistan");
   await page.getByLabel("City", { exact: true }).fill("Karachi");
   const start = page.getByRole("button", {
-    name: "Start discovery",
+    name: "Discovery unavailable",
     exact: true,
   });
   await expect(start).toBeDisabled();
@@ -489,6 +531,25 @@ test("workspace connection failure shows actionable error", async ({
     "Database connection failed",
   );
 });
+test("key workspace layouts avoid horizontal overflow at audited viewport widths", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await mocked(page);
+  for (const width of [320, 375, 414, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const path of ["/overview", "/discovery", "/leads", "/settings"]) {
+      await page.goto(path);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+        `${path} overflowed at ${width}px`,
+      ).toBe(true);
+    }
+  }
+});
+
 test("mobile navigation, keyboard dialog dismissal and no horizontal page overflow", async ({
   page,
 }) => {
@@ -624,11 +685,11 @@ test("paused cloud worker explains that queued jobs cannot run", async ({
   });
   await page.goto("/discovery");
   await expect(
-    page.getByText("Cloud discovery is paused, so new searches are blocked.", {
+    page.getByText("Worker paused — discovery unavailable.", {
       exact: false,
     }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Start discovery", exact: true }),
+    page.getByRole("button", { name: "Discovery unavailable", exact: true }),
   ).toBeDisabled();
 });

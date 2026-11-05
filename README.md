@@ -45,6 +45,8 @@ The existing project supports a private **Supabase Edge Function + Cron** worker
 
 **Current cloud state:** installed but paused after the public provider rejected a real request with HTTP 406. No discovery results were fabricated. See [cloud setup, private token handling, quotas, health, provider blocker and pause controls](docs/CLOUD_WORKER.md). Free quotas still apply; no indefinite-free guarantee is made. Do not run the persistent Node worker at the same time as cloud mode.
 
+Signed-in Settings users can run an explicit, bounded provider check for Supabase, discovery, and worker status. The check records only the caller's latest status, timestamp, latency, bounded error, last success, and recommended action—never source records, tokens, keys, or model output. A discovery check does not enqueue work or enable scheduling; with a configured Overpass endpoint it sends a zero-area request, while snapshot mode checks only snapshot readiness.
+
 ### Persistent Node worker (alternative)
 
 ```dotenv

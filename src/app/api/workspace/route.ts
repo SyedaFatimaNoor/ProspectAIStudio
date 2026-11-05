@@ -85,9 +85,16 @@ export async function GET(req: NextRequest) {
         ];
       }),
     );
+    // Optional until the provider-health migration is applied. Its absence must
+    // not make the normal workspace unreadable on an existing deployment.
+    const { data: providerHealth, error: providerHealthError } = await db
+      .from("pa_provider_health")
+      .select("provider,status,checked_at,last_success_at,latency_ms,last_error,recommended_action")
+      .eq("user_id", user.id)
+      .order("checked_at", { ascending: false });
     const { data: profile, error: profileError } = await db
       .from("pa_profiles")
-      .select("display_name")
+      .select("display_name,updated_at")
       .eq("id", user.id)
       .maybeSingle();
     if (profileError)
@@ -100,7 +107,11 @@ export async function GET(req: NextRequest) {
           id: user.id,
           email: user.email,
           display_name: profile?.display_name || "",
+          updated_at: profile?.updated_at || undefined,
         },
+        // An unavailable optional health table intentionally appears as an empty
+        // history rather than a database outage.
+        provider_health: providerHealthError ? [] : providerHealth || [],
         config,
       },
       { headers: rateLimitHeaders(rate) },

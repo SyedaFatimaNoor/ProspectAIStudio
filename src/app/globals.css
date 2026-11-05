@@ -1776,6 +1776,11 @@ textarea {
 .job-card > .notice {
   margin-top: 15px;
 }
+.job-meta {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 11px;
+}
 .job-logs {
   font-family: monospace;
   font-size: 10px;
@@ -6602,9 +6607,58 @@ textarea {
   font-size: 12px;
 }
 .onboarding-loading {
+  display: grid;
+  gap: 11px;
+  min-height: 128px;
   margin-bottom: 20px;
-  font-size: 13px;
-  color: #53617a;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+.onboarding-loading-head,
+.onboarding-loading-copy,
+.onboarding-loading-steps span {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #e9edf5;
+}
+.onboarding-loading-head::after,
+.onboarding-loading-copy::after,
+.onboarding-loading-steps span::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
+  content: "";
+  animation: onboarding-shimmer 1.4s ease-in-out infinite;
+}
+.onboarding-loading-head {
+  width: min(230px, 65%);
+  height: 16px;
+}
+.onboarding-loading-copy {
+  width: min(390px, 90%);
+  height: 12px;
+}
+.onboarding-loading-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 5px;
+}
+.onboarding-loading-steps span {
+  height: 46px;
+}
+@keyframes onboarding-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-loading-head::after,
+  .onboarding-loading-copy::after,
+  .onboarding-loading-steps span::after { animation: none; }
 }
 .onboarding-connection {
   display: flex;

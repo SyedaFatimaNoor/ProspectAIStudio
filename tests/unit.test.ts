@@ -21,6 +21,7 @@ import { factBasedConcept } from "../src/lib/proposal";
 import { csvCell } from "../src/lib/utils";
 import { aiConfigured, CompatibleAI } from "../src/lib/ai";
 import { takeStoredAuthAttempt } from "../src/lib/auth-attempt-limiter";
+import { checkProviderHealth } from "../src/lib/provider-health";
 import type { Business } from "../src/lib/types";
 const business = {
   id: "bf4941be-e03a-454b-905c-ae57c247e8e3",
@@ -321,6 +322,30 @@ test("CSV export mitigates spreadsheet formula injection and quotes delimiters",
   assert.equal(csvCell("a,b"), '"a,b"');
   assert.equal(csvCell("normal"), '"normal"');
 });
+test("discovery health check reports missing source without probing a provider", async () => {
+  const old = {
+    overpass: process.env.OVERPASS_URL,
+    extract: process.env.OSM_EXTRACT_PATH,
+    snapshot: process.env.OSM_SNAPSHOT,
+  };
+  delete process.env.OVERPASS_URL;
+  delete process.env.OSM_EXTRACT_PATH;
+  delete process.env.OSM_SNAPSHOT;
+  try {
+    const health = await checkProviderHealth("discovery", {} as never);
+    assert.equal(health.status, "not_configured");
+    assert.equal(health.last_success_at, null);
+    assert.match(health.recommended_action, /reviewed source|OSM snapshot/i);
+  } finally {
+    if (old.overpass) process.env.OVERPASS_URL = old.overpass;
+    else delete process.env.OVERPASS_URL;
+    if (old.extract) process.env.OSM_EXTRACT_PATH = old.extract;
+    else delete process.env.OSM_EXTRACT_PATH;
+    if (old.snapshot) process.env.OSM_SNAPSHOT = old.snapshot;
+    else delete process.env.OSM_SNAPSHOT;
+  }
+});
+
 test("AI gracefully reports missing configuration", async () => {
   const old = {
     ollama: process.env.OLLAMA_API_KEY,
