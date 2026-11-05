@@ -217,11 +217,15 @@ test("shared portable provider preserves provenance and the Node fingerprint wit
     assert.equal(headers.get("accept"), "application/json");
     assert.match(
       headers.get("user-agent") || "",
-      /ProspectAIStudio\/1\.1.*prospectaistudio\.vercel\.app\/responsible-use/,
+      /ProspectAIStudio\/1\.2.*prospectaistudio\.vercel\.app\/responsible-use/,
     );
-    assert.match(
-      headers.get("content-type") || "",
-      /^application\/x-www-form-urlencoded; charset=UTF-8$/i,
+    assert.equal(
+      headers.get("content-type"),
+      "application/x-www-form-urlencoded",
+    );
+    assert.equal(
+      headers.get("referer"),
+      "https://prospectaistudio.vercel.app/responsible-use",
     );
     return Response.json({
       elements: [
@@ -262,7 +266,10 @@ test("portable provider status messages distinguish denial from rate limiting", 
   assert.match(overpassFailureMessage(406), /endpoint rejected this request/);
   assert.doesNotMatch(overpassFailureMessage(406), /rate limited/i);
   assert.match(overpassFailureMessage(429), /rate limited/i);
-  assert.match(overpassFailureMessage(503), /never treated as an empty successful search/);
+  assert.match(
+    overpassFailureMessage(503),
+    /never treated as an empty successful search/,
+  );
 });
 
 test("failure logging connection errors still return a controlled failure and leave lease recovery possible", async () => {

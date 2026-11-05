@@ -4,8 +4,13 @@ import {
   extractPathConfigured,
   snapshotEnabled,
 } from "./discovery";
+import { overpassRequestHeaders } from "./discovery-core";
 
-export const healthProviderSchema = ["database", "discovery", "worker"] as const;
+export const healthProviderSchema = [
+  "database",
+  "discovery",
+  "worker",
+] as const;
 export type HealthProvider = (typeof healthProviderSchema)[number];
 export type ProviderHealthStatus =
   | "reachable"
@@ -37,7 +42,10 @@ function completed(
   provider: HealthProvider,
   started: number,
   status: ProviderHealthStatus,
-  details: Omit<ProviderHealth, "provider" | "status" | "checked_at" | "latency_ms">,
+  details: Omit<
+    ProviderHealth,
+    "provider" | "status" | "checked_at" | "latency_ms"
+  >,
 ): ProviderHealth {
   return {
     provider,
@@ -78,7 +86,8 @@ export async function checkProviderHealth(
     return completed(provider, started, "reachable", {
       last_success_at: new Date().toISOString(),
       last_error: null,
-      recommended_action: "No action needed. Continue monitoring project health.",
+      recommended_action:
+        "No action needed. Continue monitoring project health.",
     });
   }
 
@@ -87,7 +96,10 @@ export async function checkProviderHealth(
     if (error)
       return completed(provider, started, "unreachable", {
         last_success_at: null,
-        last_error: `Worker status could not be read: ${error.message}`.slice(0, 500),
+        last_error: `Worker status could not be read: ${error.message}`.slice(
+          0,
+          500,
+        ),
         recommended_action:
           "Apply the worker status migration and check the scheduler/database connection.",
       });
@@ -100,7 +112,8 @@ export async function checkProviderHealth(
           "Keep the scheduler paused until a permitted source is configured and one bounded real validation succeeds.",
       });
     return completed(provider, started, "reachable", {
-      last_success_at: worker.last_successful_at || worker.last_finished_at || null,
+      last_success_at:
+        worker.last_successful_at || worker.last_finished_at || null,
       last_error: worker.last_error || null,
       recommended_action:
         "Scheduler status is available. Inspect a bounded job log to establish actual source success.",
@@ -121,14 +134,18 @@ export async function checkProviderHealth(
     if (error)
       return completed(provider, started, "unreachable", {
         last_success_at: null,
-        last_error: `Snapshot status could not be read: ${error.message}`.slice(0, 500),
+        last_error: `Snapshot status could not be read: ${error.message}`.slice(
+          0,
+          500,
+        ),
         recommended_action:
           "Apply the snapshot migration and verify its authenticated status RPC.",
       });
     if (!snapshot?.businesses || !snapshot.places)
       return completed(provider, started, "blocked", {
         last_success_at: null,
-        last_error: "The OSM snapshot is installed but contains no searchable places or businesses.",
+        last_error:
+          "The OSM snapshot is installed but contains no searchable places or businesses.",
         recommended_action:
           "Load a lawful, attributed extract locally, then validate one bounded search while scheduling remains paused.",
       });
@@ -152,7 +169,8 @@ export async function checkProviderHealth(
   if (!endpoint)
     return completed(provider, started, "not_configured", {
       last_success_at: null,
-      last_error: "No Overpass endpoint is available to the application server.",
+      last_error:
+        "No Overpass endpoint is available to the application server.",
       recommended_action:
         "Set only an endpoint whose policy explicitly permits this bounded workload, or use the snapshot path.",
     });
@@ -160,12 +178,7 @@ export async function checkProviderHealth(
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        Accept: "application/json",
-        "User-Agent":
-          "ProspectAIStudio/1.1 (+https://prospectaistudio.vercel.app/responsible-use)",
-      },
+      headers: overpassRequestHeaders(),
       body: new URLSearchParams({
         data: "[out:json][timeout:8];node(0,0,0,0);out 1;",
       }),
@@ -184,7 +197,8 @@ export async function checkProviderHealth(
     if (!Array.isArray(payload.elements))
       return completed(provider, started, "unreachable", {
         last_success_at: null,
-        last_error: "OpenStreetMap provider returned an invalid health response.",
+        last_error:
+          "OpenStreetMap provider returned an invalid health response.",
         recommended_action:
           "Check the configured endpoint response format before scheduling work.",
       });
@@ -195,7 +209,8 @@ export async function checkProviderHealth(
         "The bounded probe succeeded. Keep normal job caps, attribution, and retries in place.",
     });
   } catch (cause) {
-    const timeout = cause instanceof DOMException && cause.name === "TimeoutError";
+    const timeout =
+      cause instanceof DOMException && cause.name === "TimeoutError";
     return completed(provider, started, "unreachable", {
       last_success_at: null,
       last_error: timeout

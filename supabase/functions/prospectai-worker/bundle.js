@@ -88,38 +88,125 @@ function overpassQuery(input) {
   const [key, value] = categoryTag[input.category];
   return `[out:json][timeout:35];(area["admin_level"="2"]["name"~${country},i];area["admin_level"="2"]["name:en"~${country},i];)->.country;(rel(area.country)["name"~${city},i]["boundary"="administrative"];rel(area.country)["name:en"~${city},i]["boundary"="administrative"];)->.city_rel;.city_rel map_to_area->.city;nwr(area.city)["${key}"="${value}"]["name"];out meta center ${Math.min(300, input.max_results * 3)};`;
 }
+var overpassReferer = "https://prospectaistudio.vercel.app/responsible-use";
+var overpassUserAgent = "ProspectAIStudio/1.2 (+https://prospectaistudio.vercel.app/responsible-use)";
+function overpassRequestHeaders() {
+  return {
+    Accept: "application/json",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent": overpassUserAgent,
+    Referer: overpassReferer
+  };
+}
+var OverpassProviderError = class extends Error {
+  constructor(message, category, status = null) {
+    super(message);
+    this.category = category;
+    this.status = status;
+    this.name = "OverpassProviderError";
+  }
+  category;
+  status;
+};
+function categoryForStatus(status) {
+  if (status === 429) return "rate_limited";
+  if ([400, 401, 403, 404, 405, 406, 410, 422].includes(status))
+    return "provider_rejected";
+  return "network_error";
+}
+function safeProviderLog(options, url, requestId, started, status, category) {
+  const event = {
+    provider: "openstreetmap",
+    endpoint_hostname: url.hostname,
+    request_id: requestId,
+    http_status: status,
+    response_time_ms: Math.max(0, Math.round(performance.now() - started)),
+    error_category: category
+  };
+  (options.log || ((entry) => console.info(JSON.stringify(entry))))(event);
+}
 function overpassFailureMessage(status) {
   const prefix = `OpenStreetMap provider returned HTTP ${status}.`;
   if (status === 406)
-    return `${prefix} The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.`;
+    return `${prefix} The endpoint rejected this request; do not retry automatically or rotate endpoints. Review provider policy/configuration before any operator-led retry.`;
   if (status === 429)
     return `${prefix} The provider rate limited this request; the worker will use bounded backoff.`;
   if ([400, 401, 403, 404, 405, 410, 422].includes(status))
     return `${prefix} The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.`;
   return `${prefix} The provider did not complete the request; retries are bounded and never treated as an empty successful search.`;
 }
-async function discoverOpenStreetMap(input, endpoint, signal) {
+async function discoverOpenStreetMap(input, endpoint, signal, options = {}) {
   if (!endpoint)
-    throw new Error("No Overpass endpoint configured. No source was queried.");
-  const url = new URL(endpoint);
-  if (!["https:", "http:"].includes(url.protocol))
-    throw new Error("Invalid Overpass endpoint.");
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      // State the narrow response type and an identifiable product URL. This
-      // lets an endpoint apply its published policy deliberately; it is not a
-      // substitute for policy review, rate-limit handling, or authentication.
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "User-Agent": "ProspectAIStudio/1.1 (+https://prospectaistudio.vercel.app/responsible-use)"
-    },
-    body: new URLSearchParams({ data: overpassQuery(input) }),
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(45e3)]) : AbortSignal.timeout(45e3)
-  });
-  if (!res.ok) throw new Error(overpassFailureMessage(res.status));
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error("Provider returned no response body.");
+    throw new OverpassProviderError(
+      "No Overpass endpoint configured. No source was queried.",
+      "network_error"
+    );
+  let url;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new OverpassProviderError(
+      "Invalid Overpass endpoint.",
+      "network_error"
+    );
+  }
+  if (url.protocol !== "https:" || url.username || url.password)
+    throw new OverpassProviderError(
+      "Invalid Overpass endpoint. HTTPS with no embedded credentials is required.",
+      "network_error"
+    );
+  const requestId = options.requestId || crypto.randomUUID();
+  const started = performance.now();
+  const timeout = AbortSignal.timeout(options.timeoutMs || 3e4);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  let response;
+  try {
+    response = await (options.fetch || fetch)(url, {
+      method: "POST",
+      headers: overpassRequestHeaders(),
+      body: new URLSearchParams({ data: overpassQuery(input) }),
+      signal: requestSignal
+    });
+  } catch (cause) {
+    const category = timeout.aborted ? "timeout" : signal?.aborted ? "cancelled" : "network_error";
+    safeProviderLog(options, url, requestId, started, null, category);
+    throw new OverpassProviderError(
+      category === "timeout" ? "OpenStreetMap provider request timed out. No search result was created." : category === "cancelled" ? "OpenStreetMap provider request was cancelled. No search result was created." : "OpenStreetMap provider could not be reached. No search result was created.",
+      category
+    );
+  }
+  if (!response.ok) {
+    const category = categoryForStatus(response.status);
+    safeProviderLog(
+      options,
+      url,
+      requestId,
+      started,
+      response.status,
+      category
+    );
+    throw new OverpassProviderError(
+      overpassFailureMessage(response.status),
+      category === "success" || category === "empty_result" ? "network_error" : category,
+      response.status
+    );
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    safeProviderLog(
+      options,
+      url,
+      requestId,
+      started,
+      response.status,
+      "invalid_response"
+    );
+    throw new OverpassProviderError(
+      "Provider returned no response body.",
+      "invalid_response",
+      response.status
+    );
+  }
   let body = "";
   let length = 0;
   const decoder = new TextDecoder();
@@ -128,20 +215,76 @@ async function discoverOpenStreetMap(input, endpoint, signal) {
       const { value, done } = await reader.read();
       if (done) break;
       length += value.byteLength;
-      if (length > 3e6)
-        throw new Error(
-          "Provider response exceeded the 3 MB safety limit. Narrow your search."
+      if (length > 3e6) {
+        safeProviderLog(
+          options,
+          url,
+          requestId,
+          started,
+          response.status,
+          "response_too_large"
         );
+        throw new OverpassProviderError(
+          "Provider response exceeded the 3 MB safety limit. Narrow your search.",
+          "response_too_large",
+          response.status
+        );
+      }
       body += decoder.decode(value, { stream: true });
     }
+  } catch (cause) {
+    if (cause instanceof OverpassProviderError) throw cause;
+    const category = timeout.aborted ? "timeout" : "network_error";
+    safeProviderLog(
+      options,
+      url,
+      requestId,
+      started,
+      response.status,
+      category
+    );
+    throw new OverpassProviderError(
+      category === "timeout" ? "OpenStreetMap provider response timed out. No search result was created." : "OpenStreetMap provider response could not be read. No search result was created.",
+      category,
+      response.status
+    );
   } finally {
     await reader.cancel();
   }
-  const parsed = parseProviderPayload(JSON.parse(body));
-  if (parsed.remark)
-    throw new Error(
-      `Provider returned an incomplete response: ${parsed.remark.slice(0, 300)}`
+  let parsed;
+  try {
+    parsed = parseProviderPayload(JSON.parse(body));
+  } catch (cause) {
+    const category = cause instanceof SyntaxError ? "invalid_json" : "invalid_response";
+    safeProviderLog(
+      options,
+      url,
+      requestId,
+      started,
+      response.status,
+      category
     );
+    throw new OverpassProviderError(
+      category === "invalid_json" ? "OpenStreetMap provider returned invalid JSON. No search result was created." : "OpenStreetMap provider returned an invalid response. No search result was created.",
+      category,
+      response.status
+    );
+  }
+  if (parsed.remark) {
+    safeProviderLog(
+      options,
+      url,
+      requestId,
+      started,
+      response.status,
+      "incomplete_response"
+    );
+    throw new OverpassProviderError(
+      `Provider returned an incomplete response: ${parsed.remark.slice(0, 300)}`,
+      "incomplete_response",
+      response.status
+    );
+  }
   const rows = [];
   for (const element of parsed.elements) {
     const t = element.tags || {};
@@ -179,6 +322,14 @@ async function discoverOpenStreetMap(input, endpoint, signal) {
     });
     if (rows.length >= input.max_results) break;
   }
+  safeProviderLog(
+    options,
+    url,
+    requestId,
+    started,
+    response.status,
+    rows.length ? "success" : "empty_result"
+  );
   return rows;
 }
 function websiteOrNull(value) {
@@ -258,8 +409,7 @@ async function discoverOsmSnapshot(input, rpc, signal) {
   for (const row of found) {
     if (input.keywords && !row.name.toLowerCase().includes(input.keywords.toLowerCase()))
       continue;
-    if (input.requirements.public_contact && !row.phone && !row.email)
-      continue;
+    if (input.requirements.public_contact && !row.phone && !row.email) continue;
     const address = [row.street, row.housenumber].filter(Boolean).join(" ");
     const location = `${input.city}|${input.country}|${address || `${row.lat.toFixed(3)},${row.lon.toFixed(3)}`}`;
     const website = websiteOrNull(row.website);
