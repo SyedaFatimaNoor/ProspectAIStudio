@@ -4,7 +4,7 @@ import { generateAndSaveConcept } from "@/lib/ai-workflow";
 import {
   memoryConceptRepository,
   publicVerifiedLead,
-} from "../../../../../tests/ai-fixtures";
+} from "../../../../tests/ai-fixtures";
 
 // TEMPORARY preview-only live provider test route. Removed after the one
 // bounded verification request. No database, real user, or browser access.
