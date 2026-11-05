@@ -65,7 +65,10 @@ export async function validWorkerToken(
   const signature = await crypto.subtle.sign("HMAC", candidate, message);
   return crypto.subtle.verify("HMAC", key, signature, message);
 }
-function databaseClient(env: Environment, deadline: AbortSignal): Database {
+export function databaseClient(
+  env: Environment,
+  deadline: AbortSignal,
+): Database {
   const base = env.get("SUPABASE_URL");
   const key = env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!base || !key || new URL(base).protocol !== "https:")
@@ -85,7 +88,18 @@ function databaseClient(env: Environment, deadline: AbortSignal): Database {
           signal: AbortSignal.any([deadline, AbortSignal.timeout(20000)]),
         },
       );
-      const data: unknown = await response.json();
+      // PostgreSQL functions returning void commonly produce a 204 with no
+      // response body. Treat that as a successful RPC instead of attempting to
+      // parse an empty body as JSON (which used to make the heartbeat fail).
+      const body = await response.text();
+      let data: unknown = null;
+      if (body) {
+        try {
+          data = JSON.parse(body) as unknown;
+        } catch {
+          data = null;
+        }
+      }
       return response.ok
         ? { data, error: null }
         : {

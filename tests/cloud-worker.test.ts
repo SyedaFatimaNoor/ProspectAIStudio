@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   createWorkerHandler,
+  databaseClient,
   validWorkerToken,
 } from "../supabase/functions/prospectai-worker/index";
 
@@ -62,6 +63,31 @@ test("cloud worker rejects unauthorized callers before any database/provider acc
 test("unconfigured cloud worker fails closed", async () => {
   const handler = createWorkerHandler({ env: { get: () => undefined } });
   assert.equal((await handler(request())).status, 503);
+});
+
+test("cloud database RPC accepts a successful empty response for void routines", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 204 });
+  try {
+    const db = databaseClient(
+      {
+        get(name) {
+          return name === "SUPABASE_URL"
+            ? "https://example.invalid"
+            : name === "SUPABASE_SERVICE_ROLE_KEY"
+              ? "test-only-service-key"
+              : undefined;
+        },
+      },
+      AbortSignal.timeout(1_000),
+    );
+    assert.deepEqual(await db.rpc("pa_cloud_heartbeat", {}), {
+      data: null,
+      error: null,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("idle/daily-capped/leased cloud worker never queries a source", async () => {
