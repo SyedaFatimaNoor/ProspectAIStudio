@@ -119,13 +119,21 @@ test("cloud job and tenant come only from a leased database claim, never request
   );
   assert.equal(response.status, 200);
   assert.equal(queries, 1);
-  assert.deepEqual(calls, [
-    { name: "pa_cloud_claim", args: undefined },
-    {
-      name: "pa_cloud_commit",
-      args: { p_job: job.id, p_token: token, p_rows: [] },
-    },
-  ]);
+  assert.equal(calls[0].name, "pa_cloud_heartbeat");
+  assert.deepEqual(calls[0].args, {
+    p_source: "openstreetmap:overpass-api.de",
+    p_worker_version: "7.0.0",
+  });
+  assert.equal(calls[1].name, "pa_cloud_claim");
+  assert.deepEqual(calls[1].args, {
+    p_source: "openstreetmap:overpass-api.de",
+    p_worker_version: "7.0.0",
+  });
+  assert.equal(calls[2].name, "pa_cloud_commit");
+  assert.deepEqual(calls[2].args?.p_job, job.id);
+  assert.deepEqual(calls[2].args?.p_token, token);
+  assert.deepEqual(calls[2].args?.p_rows, []);
+  assert.equal(typeof calls[2].args?.p_response_time_ms, "number");
   assert.equal((await response.json()).mode, "listing-only");
 });
 
@@ -136,8 +144,12 @@ test("provider failure records a retry and never fabricates a completed empty se
     database: () => ({
       rpc: async (name, args) => {
         calls.push(name);
-        if (name === "pa_cloud_fail")
+        if (name === "pa_cloud_fail") {
           assert.match(String(args?.p_error), /HTTP 429/);
+          assert.equal(args?.p_error_category, "rate_limited");
+          assert.equal(args?.p_worker_version, "7.0.0");
+          assert.equal(typeof args?.p_response_time_ms, "number");
+        }
         return {
           data: name === "pa_cloud_claim" ? { job, token } : null,
           error: null,
@@ -151,7 +163,42 @@ test("provider failure records a retry and never fabricates a completed empty se
     },
   });
   assert.equal((await handler(request())).status, 502);
-  assert.deepEqual(calls, ["pa_cloud_claim", "pa_cloud_fail"]);
+  assert.deepEqual(calls, [
+    "pa_cloud_heartbeat",
+    "pa_cloud_claim",
+    "pa_cloud_fail",
+  ]);
+});
+
+test("HTTP 406 is recorded as blocked and is never scheduled as an automatic retry", async () => {
+  const failures: Record<string, unknown>[] = [];
+  const calls: string[] = [];
+  const handler = createWorkerHandler({
+    env,
+    database: () => ({
+      rpc: async (name, args) => {
+        calls.push(name);
+        if (name === "pa_cloud_fail") failures.push(args || {});
+        return {
+          data: name === "pa_cloud_claim" ? { job, token } : null,
+          error: null,
+        };
+      },
+    }),
+    provider: {
+      discover: async () => {
+        throw new Error("Provider HTTP 406: request rejected");
+      },
+    },
+  });
+  assert.equal((await handler(request())).status, 502);
+  assert.deepEqual(calls, [
+    "pa_cloud_heartbeat",
+    "pa_cloud_claim",
+    "pa_cloud_fail",
+  ]);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].p_error_category, "provider_blocked");
 });
 
 test("commit failure does not report success", async () => {
@@ -174,6 +221,7 @@ test("commit failure does not report success", async () => {
   });
   assert.equal((await handler(request())).status, 502);
   assert.deepEqual(calls, [
+    "pa_cloud_heartbeat",
     "pa_cloud_claim",
     "pa_cloud_commit",
     "pa_cloud_fail",

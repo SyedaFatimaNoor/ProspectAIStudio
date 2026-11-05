@@ -78,7 +78,8 @@ export default function Discovery() {
   const selfHostedRunner = Boolean(data.config.self_hosted_worker);
   const discoveryUnavailable = Boolean(blockedReason);
   const lastWorkerActivity = data.config.worker?.last_finished_at || null;
-  const lastSuccessfulWorkerRun = data.config.worker?.last_successful_at || null;
+  const lastSuccessfulWorkerRun =
+    data.config.worker?.last_successful_at || null;
   const lastWorkerOutcome = data.config.worker?.last_error || null;
   const set = (key: string, value: unknown) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -156,22 +157,20 @@ export default function Discovery() {
           <Notice tone="error">
             <strong>Worker paused — discovery unavailable.</strong> The operator
             must resolve the provider/setup issue before re-enabling the
-            scheduler. Existing queued jobs are shown as blocked below; no source
-            results are fabricated.
+            scheduler. Existing queued jobs are shown as blocked below; no
+            source results are fabricated.
             {lastWorkerActivity && (
-              <>
-                {" "}Last worker activity: {formatDate(lastWorkerActivity)}.
-              </>
+              <> Last worker activity: {formatDate(lastWorkerActivity)}.</>
             )}
             {lastSuccessfulWorkerRun && (
               <>
-                {" "}Last successful worker run: {formatDate(lastSuccessfulWorkerRun)}.
+                {" "}
+                Last successful worker run:{" "}
+                {formatDate(lastSuccessfulWorkerRun)}.
               </>
             )}
             {lastWorkerOutcome && (
-              <>
-                {" "}Last recorded outcome: {lastWorkerOutcome}
-              </>
+              <> Last recorded outcome: {lastWorkerOutcome}</>
             )}{" "}
             <Link href="/settings">View setup instructions</Link>.
           </Notice>
@@ -335,8 +334,7 @@ export default function Discovery() {
               </span>
               <Badge
                 tone={
-                  !data.config.discovery ||
-                  (workerPaused && !selfHostedRunner)
+                  !data.config.discovery || (workerPaused && !selfHostedRunner)
                     ? "amber"
                     : "blue"
                 }
@@ -512,17 +510,23 @@ export default function Discovery() {
           <div className="job-list">
             {data.jobs.map((j) => {
               const jobBlocked =
-                workerPaused && !selfHostedRunner && j.status === "queued";
-              const rateLimited = Boolean(j.error?.match(/HTTP 429|rate limit/i));
+                j.status === "blocked" ||
+                (workerPaused && !selfHostedRunner && j.status === "queued");
+              const rateLimited =
+                j.status === "rate_limited" ||
+                j.error_category === "rate_limited" ||
+                Boolean(j.error?.match(/HTTP 429|rate limit/i));
               const retryScheduled =
-                j.status === "queued" && Boolean(j.error) && !jobBlocked;
+                (j.status === "rate_limited" ||
+                  (j.status === "queued" && Boolean(j.error))) &&
+                !jobBlocked;
               const statusLabel = jobBlocked
-                ? "Blocked — worker unavailable"
+                ? "Blocked — provider review required"
                 : rateLimited
                   ? "Rate limited"
                   : retryScheduled
                     ? "Queued for retry"
-                    : j.status;
+                    : j.status.replaceAll("_", " ");
               return (
                 <div className="job-card" key={j.id}>
                   <div className="job-row">
@@ -535,10 +539,12 @@ export default function Discovery() {
                         {j.country}
                       </strong>
                       <small>
-                        Job {j.id.slice(0, 8)} · {j.provider || "OpenStreetMap"} ·{" "}
-                        created {formatDate(j.created_at)} · {j.processed} /{" "}
+                        Job {j.id.slice(0, 8)} · {j.provider || "OpenStreetMap"}{" "}
+                        · created {formatDate(j.created_at)} · {j.processed} /{" "}
                         {j.total || j.max_results} source records processed
-                        {typeof j.attempts === "number" ? ` · attempt ${j.attempts}/3` : ""}
+                        {typeof j.attempts === "number"
+                          ? ` · attempt ${j.attempts}/3`
+                          : ""}
                       </small>
                     </div>
                     <Badge
@@ -556,7 +562,9 @@ export default function Discovery() {
                     </Badge>
                     <div className="job-controls">
                       {!jobBlocked &&
-                        ["queued", "running"].includes(j.status) && (
+                        ["queued", "running", "rate_limited"].includes(
+                          j.status,
+                        ) && (
                           <Button
                             size="icon"
                             variant="ghost"
@@ -567,7 +575,7 @@ export default function Discovery() {
                           </Button>
                         )}
                       {!(workerPaused && !selfHostedRunner) &&
-                        ["paused", "failed"].includes(j.status) && (
+                        ["paused", "failed", "blocked"].includes(j.status) && (
                           <Button
                             size="icon"
                             variant="ghost"
@@ -608,9 +616,11 @@ export default function Discovery() {
                   </div>
                   {jobBlocked && (
                     <Notice tone="error">
-                      {j.error
-                        ? "Blocked — worker unavailable. A prior provider attempt failed, so this job will not retry until the worker setup is reviewed."
-                        : "Blocked — worker unavailable. This job has not been sent to the provider. Resolve the worker setup before resuming it."}
+                      {j.status === "blocked"
+                        ? "Blocked after a provider or policy error. No automatic retry will run, including for HTTP 406. Review the configured source before resuming this job."
+                        : j.error
+                          ? "Blocked — worker unavailable. A prior provider attempt failed, so this job will not retry until the worker setup is reviewed."
+                          : "Blocked — worker unavailable. This job has not been sent to the provider. Resolve the worker setup before resuming it."}
                     </Notice>
                   )}
                   {j.error && (
@@ -625,8 +635,30 @@ export default function Discovery() {
                         : "Automatic retry is pending. It remains bounded to three attempts."}
                     </Notice>
                   )}
+                  {(j.provider_source ||
+                    j.response_time_ms !== undefined ||
+                    j.result_count !== undefined ||
+                    j.duplicate_count !== undefined) && (
+                    <p className="job-meta">
+                      {j.provider_source
+                        ? `Source: ${j.provider_source}. `
+                        : ""}
+                      {typeof j.response_time_ms === "number"
+                        ? `Provider response: ${j.response_time_ms} ms. `
+                        : ""}
+                      {typeof j.result_count === "number"
+                        ? `Results: ${j.result_count}. `
+                        : ""}
+                      {typeof j.duplicate_count === "number"
+                        ? `Duplicates reconciled: ${j.duplicate_count}. `
+                        : ""}
+                      {j.worker_version ? `Worker: ${j.worker_version}.` : ""}
+                    </p>
+                  )}
                   {j.updated_at && (
-                    <p className="job-meta">Last job update: {formatDate(j.updated_at)}.</p>
+                    <p className="job-meta">
+                      Last job update: {formatDate(j.updated_at)}.
+                    </p>
                   )}
                   {expanded === j.id && (
                     <div className="job-logs">

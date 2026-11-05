@@ -5,15 +5,16 @@ do $$
 declare u uuid:=gen_random_uuid(); other_u uuid:=gen_random_uuid(); j uuid; j2 uuid;
  c jsonb; result jsonb; rows jsonb; denied boolean; b uuid;
 begin
- if has_function_privilege('anon','public.pa_cloud_claim()','execute') or
-   has_function_privilege('authenticated','public.pa_cloud_commit(uuid,uuid,jsonb)','execute') or
+ if has_function_privilege('anon','public.pa_cloud_claim(text,text)','execute') or
+   has_function_privilege('authenticated','public.pa_cloud_commit(uuid,uuid,jsonb,integer)','execute') or
    has_function_privilege('authenticated','public.pa_cloud_tick()','execute') or
+   has_function_privilege('authenticated','public.pa_cloud_fail(uuid,uuid,text,text,integer,text)','execute') or
    has_function_privilege('authenticated','public.pa_cloud_pause_source(text)','execute') or
    has_table_privilege('authenticated','public.pa_cloud_worker','update') then
    raise exception 'Privileged cloud controls are exposed';
  end if;
  -- Temporarily isolate the queue. ROLLBACK restores all actual user jobs.
- update public.pa_discovery_jobs set status='paused' where status in ('queued','running');
+ update public.pa_discovery_jobs set status='paused' where status in ('queued','running','rate_limited');
  insert into auth.users(id,email) values(u,'cloud-worker-rollback@test.invalid'),(other_u,'cloud-worker-other-rollback@test.invalid');
  insert into public.pa_discovery_jobs(user_id,country,city,category,max_results,requirements)
  values(u,'Pakistan','Karachi','dentist',2,'{"website_review":true}') returning id into j;

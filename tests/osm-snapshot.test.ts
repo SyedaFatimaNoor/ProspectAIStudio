@@ -141,6 +141,7 @@ test("an unreadable cloud snapshot is not claimed or auto-paused as empty", asyn
     database: () => ({
       async rpc(name) {
         calls.push(name);
+        if (name === "pa_cloud_heartbeat") return { data: null, error: null };
         return {
           data: null,
           error: { message: "Snapshot status database connection failed" },
@@ -155,7 +156,7 @@ test("an unreadable cloud snapshot is not claimed or auto-paused as empty", asyn
     }),
   );
   assert.equal(response.status, 503);
-  assert.deepEqual(calls, ["pa_osm_snapshot_status"]);
+  assert.deepEqual(calls, ["pa_cloud_heartbeat", "pa_osm_snapshot_status"]);
 });
 
 test("an empty cloud snapshot pauses before claiming a tenant job", async () => {
@@ -174,6 +175,7 @@ test("an empty cloud snapshot pauses before claiming a tenant job", async () => 
     database: () => ({
       async rpc(name) {
         calls.push(name);
+        if (name === "pa_cloud_heartbeat") return { data: null, error: null };
         if (name === "pa_osm_snapshot_status")
           return { data: { businesses: 0, places: 0 }, error: null };
         if (name === "pa_cloud_pause_source")
@@ -191,7 +193,11 @@ test("an empty cloud snapshot pauses before claiming a tenant job", async () => 
   assert.equal(response.status, 503);
   const payload = (await response.json()) as { error?: string };
   assert.match(String(payload.error), /snapshot is not ready/i);
-  assert.deepEqual(calls, ["pa_osm_snapshot_status", "pa_cloud_pause_source"]);
+  assert.deepEqual(calls, [
+    "pa_cloud_heartbeat",
+    "pa_osm_snapshot_status",
+    "pa_cloud_pause_source",
+  ]);
 });
 
 test("the cloud worker uses the snapshot with no endpoint and no network fetch", async () => {
@@ -208,6 +214,13 @@ test("the cloud worker uses the snapshot with no endpoint and no network fetch",
   const database = () => ({
     async rpc(name: string, args?: Record<string, unknown>) {
       calls.push(name);
+      if (name === "pa_cloud_heartbeat") {
+        assert.deepEqual(args, {
+          p_source: "openstreetmap:snapshot",
+          p_worker_version: "7.0.0",
+        });
+        return { data: null, error: null };
+      }
       if (name === "pa_cloud_claim")
         return {
           data: {
@@ -253,6 +266,7 @@ test("the cloud worker uses the snapshot with no endpoint and no network fetch",
     globalThis.fetch = globalFetch;
   }
   assert.deepEqual(calls, [
+    "pa_cloud_heartbeat",
     "pa_osm_snapshot_status",
     "pa_cloud_claim",
     "pa_osm_search",

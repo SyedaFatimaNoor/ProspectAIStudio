@@ -35,7 +35,12 @@ import { browserSupabase } from "@/lib/browser-supabase";
 import { workerIsKnownPaused } from "@/lib/cloud-worker";
 import { displayNameSchema } from "@/lib/validation";
 import type { AIHealth } from "@/lib/ai";
-import type { ProviderHealthRecord, Workspace } from "@/lib/types";
+import type {
+  ProviderHealthRecord,
+  WorkerHealth,
+  WorkerJobSummary,
+  Workspace,
+} from "@/lib/types";
 const integrations = [
   {
     key: "database",
@@ -121,6 +126,39 @@ function snapshotDate(value: string | null | undefined) {
   if (!value) return "unknown";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString();
+}
+
+function workerStateLabel(worker: WorkerHealth) {
+  const lifecycle =
+    worker.lifecycle_state?.replaceAll("_", " ") || "configured";
+  if (worker.running) return `running · ${lifecycle}`;
+  if (worker.paused || !worker.enabled) return `paused · ${lifecycle}`;
+  if (worker.lifecycle_state === "running")
+    return "recovery pending · previous lease is no longer active";
+  return lifecycle;
+}
+
+function workerJobSummary(
+  summary: WorkerJobSummary | null | undefined,
+  emptyLabel = "No job recorded",
+) {
+  if (!summary) return emptyLabel;
+  const facts = [
+    summary.completed_at ? snapshotDate(summary.completed_at) : null,
+    typeof summary.result_count === "number"
+      ? `${summary.result_count} source records`
+      : null,
+    typeof summary.duplicate_count === "number"
+      ? `${summary.duplicate_count} duplicates`
+      : null,
+    typeof summary.response_time_ms === "number"
+      ? `${summary.response_time_ms} ms provider response`
+      : null,
+    summary.error_category ? summary.error_category.replaceAll("_", " ") : null,
+  ].filter(Boolean);
+  return facts.length
+    ? facts.join(" · ")
+    : "Recorded without aggregate details";
 }
 
 function snapshotState(data: Workspace) {
@@ -224,23 +262,46 @@ function integrationState(
     };
   if (key === "discovery" && workerIsKnownPaused(data.config.worker))
     return {
-      label: "Worker paused",
+      label:
+        data.config.worker?.lifecycle_state === "blocked"
+          ? "Worker blocked"
+          : "Worker paused",
       tone: "amber",
       configured: true,
       configuration: "Source configuration detected",
       reachability: "Not tested — no provider request was made",
       worker: data.config.self_hosted_worker
         ? "Hosted scheduler paused — a locally configured worker still runs queued jobs"
-        : "Paused — new discovery jobs are blocked",
+        : data.config.worker?.lifecycle_state === "blocked"
+          ? "Blocked after a provider/policy error — do not retry until the source setup is reviewed"
+          : "Paused — new discovery jobs are blocked",
       snapshot: snapshotState(data),
       quota: workerQuota(data),
       lastActivity: data.config.worker?.last_finished_at,
       lastSuccessful: data.config.worker?.last_successful_at,
       lastError: data.config.worker?.last_error,
     };
+  if (
+    key === "discovery" &&
+    data.config.worker?.lifecycle_state === "rate_limited"
+  )
+    return {
+      label: "Worker rate limited",
+      tone: "amber",
+      configured: true,
+      configuration: "Source configuration detected",
+      reachability:
+        "Waiting for the provider retry window; no request was made by this status refresh",
+      worker: "Rate limited — automatic retry remains bounded",
+      snapshot: snapshotState(data),
+      quota: workerQuota(data),
+      lastActivity: data.config.worker.last_finished_at,
+      lastSuccessful: data.config.worker.last_successful_at,
+      lastError: data.config.worker.last_error,
+    };
   if (key === "discovery" && data.config.worker?.enabled)
     return {
-      label: "Worker scheduled",
+      label: data.config.worker.running ? "Worker running" : "Worker scheduled",
       tone: "green",
       configured: true,
       configuration: "Source configuration detected",
@@ -492,6 +553,74 @@ export default function Settings() {
                         <dt>Last worker outcome</dt>
                         <dd>{status.lastError}</dd>
                       </div>
+                    )}
+                    {i.key === "discovery" && data.config.worker && (
+                      <>
+                        <div>
+                          <dt>Worker lifecycle</dt>
+                          <dd>{workerStateLabel(data.config.worker)}</dd>
+                        </div>
+                        <div>
+                          <dt>Last heartbeat</dt>
+                          <dd>
+                            {data.config.worker.last_heartbeat_at
+                              ? snapshotDate(
+                                  data.config.worker.last_heartbeat_at,
+                                )
+                              : "No heartbeat recorded"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Worker version</dt>
+                          <dd>
+                            {data.config.worker.worker_version ||
+                              "No version reported"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Provider/source</dt>
+                          <dd>
+                            {data.config.worker.provider_source ||
+                              "No source reported"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Last successful job</dt>
+                          <dd>
+                            {workerJobSummary(
+                              data.config.worker.last_successful_job,
+                              data.config.worker.last_successful_job_at
+                                ? snapshotDate(
+                                    data.config.worker.last_successful_job_at,
+                                  )
+                                : "No successful job recorded",
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Last failed job</dt>
+                          <dd>
+                            {workerJobSummary(
+                              data.config.worker.last_failed_job,
+                              data.config.worker.last_failed_job_at
+                                ? snapshotDate(
+                                    data.config.worker.last_failed_job_at,
+                                  )
+                                : "No failed or blocked job recorded",
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Last provider error</dt>
+                          <dd>
+                            {data.config.worker.last_provider_error ||
+                              "No provider error recorded"}
+                            {data.config.worker.last_error_category
+                              ? ` (${data.config.worker.last_error_category.replaceAll("_", " ")})`
+                              : ""}
+                          </dd>
+                        </div>
+                      </>
                     )}
                     {providerHealth && (
                       <>

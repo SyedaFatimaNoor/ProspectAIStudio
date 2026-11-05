@@ -481,6 +481,95 @@ function snapshotReadiness(value) {
   return { ready: true, businesses, places, message: null };
 }
 
+// src/lib/worker-lifecycle.ts
+var cloudWorkerVersion = "7.0.0";
+function httpStatus(value) {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+function classifyWorkerFailure(error) {
+  const detail = error && typeof error === "object" ? error : {};
+  const message = typeof detail.message === "string" ? detail.message : error instanceof Error ? error.message : String(error || "");
+  const matchedStatus = Number(
+    /^.*\bHTTP\s+(\d{3})\b/i.exec(message)?.[1] || 0
+  );
+  const status = httpStatus(detail.status) ?? (matchedStatus >= 100 && matchedStatus <= 599 ? matchedStatus : null);
+  if ([400, 401, 403, 404, 405, 406, 410, 422].includes(status || 0))
+    return {
+      category: "provider_blocked",
+      httpStatus: status,
+      retryable: false
+    };
+  if (status === 429 || detail.category === "rate_limited")
+    return { category: "rate_limited", httpStatus: status, retryable: true };
+  if ([408, 425, 500, 502, 503, 504].includes(status || 0))
+    return {
+      category: "transient_provider",
+      httpStatus: status,
+      retryable: true
+    };
+  if (detail.category === "provider_rejected")
+    return {
+      category: "provider_blocked",
+      httpStatus: status,
+      retryable: false
+    };
+  if (detail.category === "timeout" || /deadline exceeded|timed out/i.test(message))
+    return { category: "timeout", httpStatus: status, retryable: true };
+  if (detail.category === "network_error" || /fetch failed|connection|econnreset|etimedout|socket hang up|und_err/i.test(
+    message
+  ))
+    return { category: "network_error", httpStatus: status, retryable: true };
+  if (detail.category === "invalid_json" || detail.category === "invalid_response" || detail.category === "incomplete_response" || detail.category === "response_too_large")
+    return {
+      category: "invalid_response",
+      httpStatus: status,
+      retryable: false
+    };
+  if (detail.category === "cancelled" || /search cancelled/i.test(message))
+    return { category: "cancelled", httpStatus: status, retryable: false };
+  if (/invalid bounded discovery job|unsupported discovery provider/i.test(
+    message
+  ))
+    return { category: "invalid_job", httpStatus: status, retryable: false };
+  return { category: "internal", httpStatus: status, retryable: false };
+}
+function safeWorkerFailureDetail(error, knownFailure) {
+  const failure = knownFailure || classifyWorkerFailure(error);
+  const status = failure.httpStatus ? ` HTTP ${failure.httpStatus}` : "";
+  switch (failure.category) {
+    case "provider_blocked":
+      return `OpenStreetMap provider rejected this request${status}. Automatic retry is disabled pending source review.`;
+    case "rate_limited":
+      return `OpenStreetMap provider rate limited this request${status}. A bounded retry window applies.`;
+    case "timeout":
+      return "OpenStreetMap provider request timed out. A bounded retry may be attempted.";
+    case "network_error":
+      return "OpenStreetMap provider could not be reached. A bounded retry may be attempted.";
+    case "transient_provider":
+      return `OpenStreetMap provider returned a temporary failure${status}. A bounded retry may be attempted.`;
+    case "invalid_job":
+      return "The discovery job failed validation and was not sent for an unbounded search.";
+    case "invalid_response":
+      return "OpenStreetMap provider returned an invalid or incomplete response. No result was created.";
+    case "cancelled":
+      return "Discovery was cancelled before a result could be committed.";
+    default:
+      return "Discovery worker failed internally. Review protected worker logs before retrying.";
+  }
+}
+function workerSource(snapshot, endpoint) {
+  if (snapshot) return "openstreetmap:snapshot";
+  try {
+    const hostname = new URL(endpoint || "").hostname.toLowerCase();
+    return hostname ? `openstreetmap:${hostname}` : "openstreetmap:unknown";
+  } catch {
+    return "openstreetmap:unknown";
+  }
+}
+function boundedResponseTime(started) {
+  return Math.min(8e4, Math.max(0, Math.round(performance.now() - started)));
+}
+
 // supabase/functions/prospectai-worker/index.ts
 async function validWorkerToken(expected, supplied) {
   if (!supplied || expected.length < 32 || supplied.length > 256) return false;
@@ -577,6 +666,17 @@ function createWorkerHandler({ env, database, provider }) {
     } catch {
       return reply({ error: "Worker database configuration is missing" }, 503);
     }
+    const source = workerSource(snapshot, url?.toString());
+    try {
+      const heartbeat = await db.rpc("pa_cloud_heartbeat", {
+        p_source: source,
+        p_worker_version: cloudWorkerVersion
+      });
+      if (heartbeat.error)
+        return reply({ error: "Worker health could not be recorded" }, 503);
+    } catch {
+      return reply({ error: "Worker health could not be recorded" }, 503);
+    }
     if (snapshot) {
       try {
         const { data, error } = await db.rpc("pa_osm_snapshot_status");
@@ -597,7 +697,7 @@ function createWorkerHandler({ env, database, provider }) {
             console.error(
               JSON.stringify({
                 event: "cloud_source_pause_failed",
-                error: paused.error.message.slice(0, 500)
+                error_category: "database_error"
               })
             );
           return reply(
@@ -617,8 +717,12 @@ function createWorkerHandler({ env, database, provider }) {
       }
     }
     let claimed = null;
+    let sourceRequestStarted = null;
     try {
-      const { data, error } = await db.rpc("pa_cloud_claim");
+      const { data, error } = await db.rpc("pa_cloud_claim", {
+        p_source: source,
+        p_worker_version: cloudWorkerVersion
+      });
       if (error) throw new Error(error.message);
       if (!data) return reply({ idle: true });
       claimed = claim(data);
@@ -626,16 +730,19 @@ function createWorkerHandler({ env, database, provider }) {
       if (job.provider !== "openstreetmap")
         throw new Error("Unsupported discovery provider");
       const input = parseCloudSearch(job);
+      sourceRequestStarted = performance.now();
       const rows = provider ? await provider.discover(input, deadline) : snapshot ? await discoverOsmSnapshot(
         input,
         (name, args) => db.rpc(name, args),
         deadline
       ) : await discoverOpenStreetMap(input, url.toString(), deadline);
+      const responseTime = boundedResponseTime(sourceRequestStarted);
       if (deadline.aborted) throw new Error("Worker deadline exceeded");
       const committed = await db.rpc("pa_cloud_commit", {
         p_job: job.id,
         p_token: claimed.token,
-        p_rows: rows
+        p_rows: rows,
+        p_response_time_ms: responseTime
       });
       if (committed.error) throw new Error(committed.error.message);
       console.info(
@@ -647,27 +754,40 @@ function createWorkerHandler({ env, database, provider }) {
       );
       return reply({ result: committed.data, mode: "listing-only" });
     } catch (error) {
-      const message = (error instanceof Error ? error.message : "Worker failed").slice(0, 500);
+      const effectiveError = deadline.aborted ? new Error("Worker deadline exceeded") : error;
+      const failure = classifyWorkerFailure(effectiveError);
+      const message = safeWorkerFailureDetail(effectiveError, failure);
+      const responseTime = sourceRequestStarted === null ? null : boundedResponseTime(sourceRequestStarted);
       if (claimed) {
         try {
           const failed = await db.rpc("pa_cloud_fail", {
             p_job: claimed.job.id,
             p_token: claimed.token,
-            p_error: message
+            p_error: message,
+            p_error_category: failure.category,
+            p_response_time_ms: responseTime,
+            p_worker_version: cloudWorkerVersion
           });
           if (failed.error) throw new Error("Failure logging unavailable");
         } catch {
           console.error(
-            "Failure could not be recorded; lease recovery will retry."
+            JSON.stringify({
+              event: "cloud_failure_recording_failed",
+              error_category: "database_error"
+            })
           );
         }
       }
       console.error(
-        JSON.stringify({ event: "cloud_worker_failed", error: message })
+        JSON.stringify({
+          event: "cloud_worker_failed",
+          error_category: failure.category,
+          http_status: failure.httpStatus
+        })
       );
       return reply(
         {
-          error: "Discovery attempt failed. See job logs; retries are bounded."
+          error: "Discovery attempt failed. See job logs; retries are limited to safe transient errors."
         },
         502
       );

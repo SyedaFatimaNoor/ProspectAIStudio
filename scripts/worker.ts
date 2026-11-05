@@ -9,6 +9,13 @@ import {
 } from "../src/lib/discovery";
 import { jobSchema } from "../src/lib/validation";
 import { verifyBusiness } from "../src/lib/verification";
+import {
+  boundedResponseTime,
+  classifyWorkerFailure,
+  cloudWorkerVersion,
+  safeWorkerFailureDetail,
+  workerSource,
+} from "../src/lib/worker-lifecycle";
 import type { Business } from "../src/lib/types";
 nextEnv.loadEnvConfig(process.cwd());
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -74,13 +81,20 @@ async function must<T extends { error: unknown }>(operation: PromiseLike<T>) {
 // A country-wide .osm.pbf scan can outlast the two-minute lease meant for HTTP
 // sources; an expired lease lets the sweep re-claim the same job and re-parse it.
 const discoveryLeaseMs = process.env.OSM_EXTRACT_PATH ? 900000 : 120000;
-async function discovery() {  await must(
+const localWorkerSource = workerSource(
+  process.env.OSM_SNAPSHOT === "1" || Boolean(process.env.OSM_EXTRACT_PATH),
+  process.env.OVERPASS_URL,
+);
+async function discovery() {
+  await must(
     db
       .from("pa_discovery_jobs")
       .update({
         status: "failed",
         error:
           "Worker lease expired after the maximum number of attempts. Resume to retry.",
+        error_category: "recovery_exhausted",
+        completed_at: new Date().toISOString(),
         lease_until: null,
       })
       .eq("status", "running")
@@ -94,7 +108,7 @@ async function discovery() {  await must(
       .select("*")
       .eq("user_id", claimUser)
       .or(
-        `status.eq.queued,and(status.eq.running,lease_until.lt.${new Date().toISOString()})`,
+        `status.in.(queued,rate_limited),and(status.eq.running,lease_until.lt.${new Date().toISOString()})`,
       )
       .lt("attempts", 3)
       .lte("next_retry_at", new Date().toISOString())
@@ -113,6 +127,15 @@ async function discovery() {  await must(
         status: "running",
         attempts: found.attempts + 1,
         lease_until: new Date(Date.now() + discoveryLeaseMs).toISOString(),
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        response_time_ms: null,
+        result_count: null,
+        duplicate_count: null,
+        error: null,
+        error_category: null,
+        provider_source: localWorkerSource,
+        worker_version: `local-${cloudWorkerVersion}`,
       })
       .eq("id", found.id)
       .eq("user_id", claimUser)
@@ -127,22 +150,30 @@ async function discovery() {  await must(
     logs.push(`${new Date().toISOString()} ${text}`);
     log("discovery", { job: job.id, message: text });
   };
+  let sourceStarted: number | null = null;
   try {
     add(
       `Claimed a ${discoveryLeaseMs / 60000}-minute lease. Querying configured public source.`,
     );
     await must(db.from("pa_discovery_jobs").update({ logs }).eq("id", job.id));
+    sourceStarted = performance.now();
     const rows = await getProvider(job.provider).discover(
       jobSchema.parse(job),
       controller.signal,
     );
+    const responseTime = boundedResponseTime(sourceStarted);
     add(
       `Provider returned ${rows.length} matching public listings. These are unverified records.`,
     );
     await must(
       db
         .from("pa_discovery_jobs")
-        .update({ total: rows.length, logs })
+        .update({
+          total: rows.length,
+          result_count: rows.length,
+          response_time_ms: responseTime,
+          logs,
+        })
         .eq("id", job.id)
         .eq("status", "running"),
     );
@@ -151,6 +182,7 @@ async function discovery() {  await must(
     );
     const known = (existing || []) as (DiscoveredBusiness & { id?: string })[];
     let processed = 0;
+    let duplicateCount = 0;
     for (const row of rows) {
       if (stopping)
         throw new Error("Worker shutting down. Job will be retried.");
@@ -168,6 +200,7 @@ async function discovery() {  await must(
         return true;
       }
       let record = known.find((b) => isDuplicate(row, b));
+      const duplicate = Boolean(record);
       if (!record) {
         // A dropped uplink response surfaces as an error object without a code,
         // so retry it; a unique violation is resolved by the lookups below.
@@ -222,6 +255,9 @@ async function discovery() {  await must(
         }
         if (record) known.push(record);
       }
+      if (record && !known.some((business) => business.id === record!.id))
+        known.push(record);
+      if (duplicate) duplicateCount++;
       // Reconcile provenance even on a resumed job that inserted the business before crashing.
       if (record?.id) {
         await must(
@@ -288,31 +324,64 @@ async function discovery() {  await must(
         .update({
           status: "completed",
           processed,
+          total: rows.length,
+          result_count: rows.length,
+          duplicate_count: duplicateCount,
           logs,
           error: null,
+          error_category: null,
+          completed_at: new Date().toISOString(),
           lease_until: null,
         })
         .eq("id", job.id)
         .eq("status", "running"),
     );
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    add(`Attempt ${job.attempts} failed: ${message}`);
+    const failure = classifyWorkerFailure(e);
+    const message = safeWorkerFailureDetail(e, failure);
+    const canRetry = failure.retryable && job.attempts < 3;
+    const status =
+      failure.category === "provider_blocked"
+        ? "blocked"
+        : failure.category === "rate_limited" && canRetry
+          ? "rate_limited"
+          : canRetry
+            ? "queued"
+            : "failed";
+    const retryMs =
+      failure.category === "rate_limited"
+        ? Math.min(1_200_000, 300_000 * 2 ** Math.max(0, job.attempts - 1))
+        : Math.min(240_000, 60_000 * 2 ** Math.max(0, job.attempts - 1));
+    add(`Attempt ${job.attempts} failed (${failure.category}): ${message}`);
     await must(
       db
         .from("pa_discovery_jobs")
         .update({
-          status: job.attempts >= 3 ? "failed" : "queued",
-          error: message,
+          status,
+          error: message.slice(0, 500),
+          error_category: failure.category,
+          response_time_ms:
+            sourceStarted === null ? null : boundedResponseTime(sourceStarted),
+          completed_at: ["blocked", "failed"].includes(status)
+            ? new Date().toISOString()
+            : null,
           logs,
           lease_until: null,
-          next_retry_at: new Date(
-            Date.now() + Math.min(300000, 30000 * 2 ** job.attempts),
-          ).toISOString(),
+          next_retry_at: canRetry
+            ? new Date(Date.now() + retryMs).toISOString()
+            : job.next_retry_at,
         })
         .eq("id", job.id)
         .eq("status", "running"),
     );
+    if (failure.category === "provider_blocked") {
+      stopping = true;
+      log("discovery_source_blocked", {
+        job: job.id,
+        category: failure.category,
+        httpStatus: failure.httpStatus,
+      });
+    }
   }
   return true;
 }
