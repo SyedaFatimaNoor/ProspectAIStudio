@@ -185,6 +185,40 @@ for (const mode of ["preview", "source-missing", "paused"] as const) {
   });
 }
 
+test("an enabled but empty OSM snapshot is blocked before it can queue a job", async ({
+  page,
+}) => {
+  await workspace(page, {
+    config: {
+      database: true,
+      discovery: false,
+      discovery_error:
+        "The OpenStreetMap snapshot is enabled but has no searchable places or businesses. No search was run.",
+      ai: false,
+      snapshot: {
+        businesses: 0,
+        places: 0,
+        oldest_snapshot: null,
+        newest_snapshot: null,
+      },
+    },
+  });
+  let actions = 0;
+  await page.route("**/api/actions", (r) => {
+    actions++;
+    return r.fulfill({ json: { ok: true } });
+  });
+  await page.goto("/discovery");
+  await country(page).fill("Pakistan");
+  await city(page).fill("Karachi");
+  await expect(start(page)).toBeDisabled();
+  await page.locator("form.form-stack").dispatchEvent("submit");
+  await expect(page.getByRole("main").getByRole("alert")).toContainText(
+    "snapshot is enabled but has no searchable places or businesses",
+  );
+  expect(actions).toBe(0);
+});
+
 test("a paused worker labels existing queued work as blocked and prevents a resume control", async ({
   page,
 }) => {

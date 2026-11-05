@@ -6,9 +6,10 @@ declare u uuid:=gen_random_uuid(); other_u uuid:=gen_random_uuid(); j uuid; j2 u
  c jsonb; result jsonb; rows jsonb; denied boolean; b uuid;
 begin
  if has_function_privilege('anon','public.pa_cloud_claim()','execute') or
-    has_function_privilege('authenticated','public.pa_cloud_commit(uuid,uuid,jsonb)','execute') or
-    has_function_privilege('authenticated','public.pa_cloud_tick()','execute') or
-    has_table_privilege('authenticated','public.pa_cloud_worker','update') then
+   has_function_privilege('authenticated','public.pa_cloud_commit(uuid,uuid,jsonb)','execute') or
+   has_function_privilege('authenticated','public.pa_cloud_tick()','execute') or
+   has_function_privilege('authenticated','public.pa_cloud_pause_source(text)','execute') or
+   has_table_privilege('authenticated','public.pa_cloud_worker','update') then
    raise exception 'Privileged cloud controls are exposed';
  end if;
  -- Temporarily isolate the queue. ROLLBACK restores all actual user jobs.

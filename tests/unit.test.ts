@@ -22,7 +22,9 @@ import { csvCell } from "../src/lib/utils";
 import { aiConfigured, CompatibleAI } from "../src/lib/ai";
 import { takeStoredAuthAttempt } from "../src/lib/auth-attempt-limiter";
 import { checkProviderHealth } from "../src/lib/provider-health";
-import type { Business } from "../src/lib/types";
+import { snapshotReadiness } from "../src/lib/source-readiness";
+import { discoveryBlockReason } from "../src/lib/discovery-form";
+import { emptyWorkspace, type Business } from "../src/lib/types";
 const business = {
   id: "bf4941be-e03a-454b-905c-ae57c247e8e3",
   name: "TEST FIXTURE — NOT A REAL LEAD",
@@ -111,6 +113,29 @@ test("jobs reject unsupported categories, unbounded queries, and empty locations
     false,
   );
   assert.equal(jobSchema.safeParse(search).success, true);
+});
+test("an empty OSM snapshot is not treated as a usable discovery source", () => {
+  const readiness = snapshotReadiness({ businesses: 0, places: 0 });
+  assert.equal(readiness.ready, false);
+  assert.match(readiness.message || "", /no searchable places or businesses/i);
+  const data = structuredClone(emptyWorkspace);
+  data.user = { id: "test-only" };
+  data.config = {
+    database: true,
+    discovery: false,
+    ai: false,
+    discovery_error: readiness.message || undefined,
+  };
+  assert.match(
+    discoveryBlockReason(data) || "",
+    /OpenStreetMap snapshot is enabled but has no searchable/i,
+  );
+  assert.deepEqual(snapshotReadiness({ businesses: 1, places: 1 }), {
+    ready: true,
+    businesses: 1,
+    places: 1,
+    message: null,
+  });
 });
 test("unconfigured discovery fails rather than fabricating success", async () => {
   const old = process.env.OVERPASS_URL;
@@ -275,23 +300,35 @@ test("browser auth attempt guard is bounded and stores no account data", () => {
     setItem: (key: string, value: string) => values.set(key, value),
   };
   const options = { limit: 2, windowMs: 60_000 };
-  assert.deepEqual(takeStoredAuthAttempt(storage, "credentials", options, 1_000), {
-    allowed: true,
-  });
-  assert.deepEqual(takeStoredAuthAttempt(storage, "credentials", options, 2_000), {
-    allowed: true,
-  });
+  assert.deepEqual(
+    takeStoredAuthAttempt(storage, "credentials", options, 1_000),
+    {
+      allowed: true,
+    },
+  );
+  assert.deepEqual(
+    takeStoredAuthAttempt(storage, "credentials", options, 2_000),
+    {
+      allowed: true,
+    },
+  );
   const blocked = takeStoredAuthAttempt(storage, "credentials", options, 3_000);
   assert.equal(blocked.allowed, false);
   if (!blocked.allowed) assert.equal(blocked.retryAfterSeconds, 58);
   assert.doesNotMatch([...values.values()].join(""), /@|password|token/i);
-  assert.deepEqual(takeStoredAuthAttempt(storage, "credentials", options, 62_000), {
-    allowed: true,
-  });
+  assert.deepEqual(
+    takeStoredAuthAttempt(storage, "credentials", options, 62_000),
+    {
+      allowed: true,
+    },
+  );
 });
 
 test("display names allow ordinary punctuation with clear validation", () => {
-  assert.equal(displayNameSchema.safeParse('Noor & Co. "Studio"').success, true);
+  assert.equal(
+    displayNameSchema.safeParse('Noor & Co. "Studio"').success,
+    true,
+  );
   assert.equal(displayNameSchema.safeParse("نور فاطمہ").success, true);
   const invalid = displayNameSchema.safeParse("Name\u0000");
   assert.equal(invalid.success, false);

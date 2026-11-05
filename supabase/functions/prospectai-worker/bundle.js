@@ -296,6 +296,24 @@ async function discoverOsmSnapshot(input, rpc, signal) {
   return rows;
 }
 
+// src/lib/source-readiness.ts
+function count(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+function snapshotReadiness(value) {
+  const status = value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+  const businesses = count(status?.businesses);
+  const places = count(status?.places);
+  if (businesses > 0 && places > 0)
+    return { ready: true, businesses, places, message: null };
+  return {
+    ready: false,
+    businesses,
+    places,
+    message: "The OpenStreetMap snapshot is enabled but has no searchable places or businesses. Load a lawful, attributed extract and validate one bounded search while scheduling remains paused. No search was run."
+  };
+}
+
 // supabase/functions/prospectai-worker/index.ts
 async function validWorkerToken(expected, supplied) {
   if (!supplied || expected.length < 32 || supplied.length > 256) return false;
@@ -391,6 +409,45 @@ function createWorkerHandler({ env, database, provider }) {
       db = database ? database() : databaseClient(env, deadline);
     } catch {
       return reply({ error: "Worker database configuration is missing" }, 503);
+    }
+    if (snapshot) {
+      try {
+        const { data, error } = await db.rpc("pa_osm_snapshot_status");
+        if (error)
+          return reply(
+            {
+              error: "OpenStreetMap snapshot readiness could not be verified. No job was claimed; keep scheduling paused."
+            },
+            503
+          );
+        const readiness = snapshotReadiness(data);
+        if (!readiness.ready) {
+          const reason = readiness.message || "The OpenStreetMap snapshot is not ready for discovery. No job was claimed.";
+          const paused = await db.rpc("pa_cloud_pause_source", {
+            p_error: reason
+          });
+          if (paused.error)
+            console.error(
+              JSON.stringify({
+                event: "cloud_source_pause_failed",
+                error: paused.error.message.slice(0, 500)
+              })
+            );
+          return reply(
+            {
+              error: "OpenStreetMap snapshot is not ready. No job was claimed; scheduling is paused pending source setup."
+            },
+            503
+          );
+        }
+      } catch {
+        return reply(
+          {
+            error: "OpenStreetMap snapshot readiness could not be verified. No job was claimed; keep scheduling paused."
+          },
+          503
+        );
+      }
     }
     let claimed = null;
     try {

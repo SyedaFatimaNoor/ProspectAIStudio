@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { serverSupabase } from "@/lib/supabase";
 import { supabaseConfigured } from "@/lib/supabase-config";
 import { aiConfigured } from "@/lib/ai";
-import { discoverySourceConfigured, localSourceOnly } from "@/lib/discovery";
+import {
+  discoverySourceConfigured,
+  localSourceOnly,
+  snapshotEnabled,
+} from "@/lib/discovery";
+import { snapshotReadiness } from "@/lib/source-readiness";
 import { emptyWorkspace, type Workspace } from "@/lib/types";
 import {
   clientRateLimitKey,
@@ -11,13 +16,19 @@ import {
 } from "@/lib/rate-limit";
 export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
-  const rate = takeRateLimit(clientRateLimitKey(req.headers, "workspace-read"), {
-    limit: 60,
-    windowMs: 60_000,
-  });
+  const rate = takeRateLimit(
+    clientRateLimitKey(req.headers, "workspace-read"),
+    {
+      limit: 60,
+      windowMs: 60_000,
+    },
+  );
   if (!rate.allowed)
     return NextResponse.json(
-      { error: "Too many workspace refreshes. Please wait a moment and try again." },
+      {
+        error:
+          "Too many workspace refreshes. Please wait a moment and try again.",
+      },
       { status: 429, headers: rateLimitHeaders(rate) },
     );
   const config: Workspace["config"] = {
@@ -59,6 +70,16 @@ export async function GET(req: NextRequest) {
       "pa_osm_snapshot_status",
     );
     if (!snapshotError && snapshot) config.snapshot = snapshot;
+    // A snapshot flag only selects the adapter. It is not itself a source until
+    // its aggregate place and business counts prove that a bounded search can
+    // be served. Keep this server-derived state separate from worker status.
+    if (snapshotEnabled()) {
+      const readiness = snapshotReadiness(snapshotError ? null : snapshot);
+      if (!readiness.ready) {
+        config.discovery = false;
+        config.discovery_error = readiness.message || undefined;
+      }
+    }
     const tables = {
       businesses: "businesses",
       jobs: "discovery_jobs",
@@ -89,7 +110,9 @@ export async function GET(req: NextRequest) {
     // not make the normal workspace unreadable on an existing deployment.
     const { data: providerHealth, error: providerHealthError } = await db
       .from("pa_provider_health")
-      .select("provider,status,checked_at,last_success_at,latency_ms,last_error,recommended_action")
+      .select(
+        "provider,status,checked_at,last_success_at,latency_ms,last_error,recommended_action",
+      )
       .eq("user_id", user.id)
       .order("checked_at", { ascending: false });
     const { data: profile, error: profileError } = await db
