@@ -33,13 +33,15 @@ import { formatDate } from "@/lib/utils";
 import {
   discoveryResultLimit,
   validateDiscoveryForm,
-  discoveryBlockReason,
   discoveryJobErrorMessage,
 } from "@/lib/discovery-form";
 import {
-  selfHostedWorkerMessage,
-  workerIsKnownPaused,
-} from "@/lib/cloud-worker";
+  discoveryAvailability,
+  discoveryFixabilityLabel,
+  discoveryJobOutcome,
+  safeOperationalMessage,
+} from "@/lib/discovery-availability";
+import { workerIsKnownPaused } from "@/lib/cloud-worker";
 export default function Discovery() {
   const { data, loading, connectionError, action, notify, refresh } =
     useWorkspace();
@@ -73,14 +75,11 @@ export default function Discovery() {
     limit,
   );
   const errors = attempted ? validation.errors : {};
-  const blockedReason = discoveryBlockReason(data, loading, connectionError);
+  const availability = discoveryAvailability(data, loading, connectionError);
+  const blockedReason = availability.available ? null : availability.reason;
   const workerPaused = workerIsKnownPaused(data.config.worker);
   const selfHostedRunner = Boolean(data.config.self_hosted_worker);
-  const discoveryUnavailable = Boolean(blockedReason);
-  const lastWorkerActivity = data.config.worker?.last_finished_at || null;
-  const lastSuccessfulWorkerRun =
-    data.config.worker?.last_successful_at || null;
-  const lastWorkerOutcome = data.config.worker?.last_error || null;
+  const discoveryUnavailable = !availability.available;
   const set = (key: string, value: unknown) => {
     setForm((f) => ({ ...f, [key]: value }));
     setSubmissionError(null);
@@ -122,7 +121,10 @@ export default function Discovery() {
     } catch (error) {
       setSubmissionError(
         error instanceof Error
-          ? error.message
+          ? safeOperationalMessage(
+              error.message,
+              "Unable to queue discovery. Check the connection and try again.",
+            )
           : "Unable to queue discovery. Check the connection and try again.",
       );
     } finally {
@@ -147,34 +149,86 @@ export default function Discovery() {
           Refresh jobs
         </Button>
       </PageHeading>
-      {workerPaused &&
-        (selfHostedRunner ? (
+      {discoveryUnavailable && (
+        <section
+          className="discovery-availability"
+          aria-labelledby="discovery-unavailable-title"
+          role="region"
+        >
+          <div className="discovery-availability-heading">
+            <span className="discovery-availability-icon">
+              <Info size={18} />
+            </span>
+            <div>
+              <div className="eyebrow">DISCOVERY STATUS</div>
+              <h2 id="discovery-unavailable-title">Discovery unavailable</h2>
+              <p>Review the current safe telemetry and setup guidance.</p>
+            </div>
+            <Badge tone="amber">
+              {discoveryFixabilityLabel(availability.fixability)}
+            </Badge>
+          </div>
+          <dl className="discovery-availability-list">
+            <div>
+              <dt>Exact reason</dt>
+              <dd>{availability.reason}</dd>
+            </div>
+            <div>
+              <dt>Last worker activity</dt>
+              <dd>
+                {availability.lastWorkerActivity
+                  ? formatDate(availability.lastWorkerActivity)
+                  : "No worker activity recorded"}
+              </dd>
+            </div>
+            <div>
+              <dt>Last provider check</dt>
+              <dd>
+                {availability.lastProviderCheck
+                  ? `${formatDate(availability.lastProviderCheck.checked_at)} · ${availability.lastProviderCheck.status.replaceAll("_", " ")}`
+                  : "No provider check recorded"}
+              </dd>
+            </div>
+            <div>
+              <dt>Last HTTP status</dt>
+              <dd>
+                {availability.lastHttpStatus
+                  ? `HTTP ${availability.lastHttpStatus}`
+                  : "No HTTP status recorded"}
+              </dd>
+            </div>
+            <div>
+              <dt>Response time</dt>
+              <dd>
+                {typeof availability.responseTimeMs === "number"
+                  ? `${availability.responseTimeMs} ms`
+                  : "No response time recorded"}
+              </dd>
+            </div>
+            <div>
+              <dt>Recommended action</dt>
+              <dd>{availability.recommendedAction}</dd>
+            </div>
+            <div>
+              <dt>Who can fix this?</dt>
+              <dd>{discoveryFixabilityLabel(availability.fixability)}</dd>
+            </div>
+          </dl>
+          <Link className="discovery-availability-link" href="/settings">
+            View setup instructions
+            <ArrowRight size={14} />
+          </Link>
+        </section>
+      )}
+      {availability.available &&
+        (availability.lastProviderCheck?.status === "rate_limited" ||
+          data.config.worker?.lifecycle_state === "rate_limited") && (
           <Notice>
-            {selfHostedWorkerMessage}{" "}
-            <Link href="/settings">View setup instructions</Link>.
+            <strong>Provider rate limit.</strong> The source is waiting for its
+            bounded retry window. You may queue a bounded job, but it will not
+            be treated as complete until the provider responds.
           </Notice>
-        ) : (
-          <Notice tone="error">
-            <strong>Worker paused — discovery unavailable.</strong> The operator
-            must resolve the provider/setup issue before re-enabling the
-            scheduler. Existing queued jobs are shown as blocked below; no
-            source results are fabricated.
-            {lastWorkerActivity && (
-              <> Last worker activity: {formatDate(lastWorkerActivity)}.</>
-            )}
-            {lastSuccessfulWorkerRun && (
-              <>
-                {" "}
-                Last successful worker run:{" "}
-                {formatDate(lastSuccessfulWorkerRun)}.
-              </>
-            )}
-            {lastWorkerOutcome && (
-              <> Last recorded outcome: {lastWorkerOutcome}</>
-            )}{" "}
-            <Link href="/settings">View setup instructions</Link>.
-          </Notice>
-        ))}
+        )}
       {data.config.worker?.enabled && (
         <Notice>
           Cloud discovery is enabled: one job attempt every{" "}
@@ -202,7 +256,8 @@ export default function Discovery() {
           >
             {attempted && !validation.success && (
               <div className="form-feedback form-feedback-error" role="alert">
-                Please check the highlighted fields before starting discovery.
+                <strong>Invalid search input.</strong> Please check the
+                highlighted fields before starting discovery.
               </div>
             )}
             {submissionError && (
@@ -407,33 +462,38 @@ export default function Discovery() {
                 <ShieldCheck size={14} />
                 No scraping. No invented leads.
               </span>
-              <Button
-                type="submit"
-                disabled={busy || discoveryUnavailable}
-                aria-describedby={
-                  discoveryUnavailable ? "discovery-unavailable" : undefined
+              <span
+                title={
+                  discoveryUnavailable
+                    ? availability.reason
+                    : "Queue a bounded OpenStreetMap discovery job."
                 }
               >
-                {busy ? <Spinner /> : <Compass size={16} />}
-                {busy
-                  ? "Queuing discovery…"
-                  : discoveryUnavailable
-                    ? "Discovery unavailable"
-                    : "Start discovery"}
-                <ArrowRight size={16} />
-              </Button>
+                <Button
+                  type="submit"
+                  disabled={busy || discoveryUnavailable}
+                  aria-describedby={
+                    discoveryUnavailable ? "discovery-unavailable" : undefined
+                  }
+                >
+                  {busy ? <Spinner /> : <Compass size={16} />}
+                  {busy
+                    ? "Queuing discovery…"
+                    : discoveryUnavailable
+                      ? "Discovery unavailable"
+                      : "Start discovery"}
+                  <ArrowRight size={16} />
+                </Button>
+              </span>
             </div>
             {blockedReason && (
               <p
-                className={
-                  workerPaused || !data.config.discovery
-                    ? "sr-only"
-                    : "form-submit-help"
-                }
+                className="form-submit-help"
                 id="discovery-unavailable"
                 role="status"
               >
-                {blockedReason}{" "}
+                <strong>Why disabled:</strong> Review the Discovery unavailable
+                details above. {availability.recommendedAction}{" "}
                 <Link href="/settings">View setup instructions</Link>.
               </p>
             )}
@@ -527,6 +587,7 @@ export default function Discovery() {
                   : retryScheduled
                     ? "Queued for retry"
                     : j.status.replaceAll("_", " ");
+              const outcome = discoveryJobOutcome(j);
               return (
                 <div className="job-card" key={j.id}>
                   <div className="job-row">
@@ -614,16 +675,19 @@ export default function Discovery() {
                       }}
                     />
                   </div>
-                  {jobBlocked && (
+                  {jobBlocked && j.status !== "blocked" && (
                     <Notice tone="error">
-                      {j.status === "blocked"
-                        ? "Blocked after a provider or policy error. No automatic retry will run, including for HTTP 406. Review the configured source before resuming this job."
-                        : j.error
-                          ? "Blocked — worker unavailable. A prior provider attempt failed, so this job will not retry until the worker setup is reviewed."
-                          : "Blocked — worker unavailable. This job has not been sent to the provider. Resolve the worker setup before resuming it."}
+                      Blocked — worker unavailable. This job has not been sent
+                      to the provider. Resolve the worker/source setup before
+                      resuming it.
                     </Notice>
                   )}
-                  {j.error && (
+                  {outcome && (
+                    <Notice tone={outcome.tone}>
+                      <strong>{outcome.title}.</strong> {outcome.detail}
+                    </Notice>
+                  )}
+                  {j.error && !outcome && (
                     <Notice tone={rateLimited ? "info" : "error"}>
                       {discoveryJobErrorMessage(j.error)}
                     </Notice>

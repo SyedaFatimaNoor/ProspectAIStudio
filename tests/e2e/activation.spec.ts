@@ -219,6 +219,65 @@ test("an enabled but empty OSM snapshot is blocked before it can queue a job", a
   expect(actions).toBe(0);
 });
 
+test("Discovery unavailable shows safe provider diagnostics and links to setup", async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  state.config.worker = {
+    enabled: true,
+    mode: "listing-only",
+    lifecycle_state: "blocked",
+    daily_limit: 20,
+    daily_attempts: 1,
+    interval_minutes: 5,
+    last_started_at: "2026-11-05T08:45:00.000Z",
+    last_finished_at: "2026-11-05T08:46:00.000Z",
+    last_error_category: "provider_blocked",
+    last_provider_error: "HTTP 406 Authorization: Bearer test-secret-value",
+  };
+  state.provider_health = [
+    {
+      provider: "discovery",
+      status: "blocked",
+      checked_at: "2026-11-05T08:46:00.000Z",
+      last_success_at: null,
+      latency_ms: 421,
+      last_error: "HTTP 406 Authorization: Bearer test-secret-value",
+      recommended_action: "Review permitted provider policy.",
+    },
+  ];
+
+  await page.goto("/discovery");
+  const diagnostics = page.locator(".discovery-availability");
+  await expect(diagnostics).toContainText("Discovery unavailable");
+  await expect(diagnostics).toContainText("OpenStreetMap returned HTTP 406");
+  await expect(diagnostics).toContainText("Last worker activity");
+  await expect(diagnostics).toContainText("Last provider check");
+  await expect(diagnostics).toContainText("HTTP 406");
+  await expect(diagnostics).toContainText("421 ms");
+  await expect(diagnostics).toContainText("Recommended action");
+  await expect(diagnostics).toContainText("Operator-fixable");
+  await expect(
+    diagnostics.getByRole("link", { name: "View setup instructions" }),
+  ).toHaveAttribute("href", "/settings");
+  await expect(start(page)).toBeDisabled();
+  await expect(start(page).locator("..")).toHaveAttribute("title", /HTTP 406/);
+  await expect(page.getByText("test-secret-value")).toHaveCount(0);
+
+  await page.goto("/settings");
+  const discovery = page
+    .locator(".integration-card")
+    .filter({ has: page.getByRole("heading", { name: "OpenStreetMap" }) });
+  await expect(discovery).toContainText("Discovery unavailable");
+  await expect(discovery).toContainText("Last HTTP status");
+  await expect(discovery).toContainText("HTTP 406");
+  await expect(discovery).toContainText("Response time");
+  await expect(discovery).toContainText("421 ms");
+  await expect(discovery).toContainText("Who can fix this?");
+  await expect(discovery).toContainText("Operator-fixable");
+  await expect(discovery).not.toContainText("test-secret-value");
+});
+
 test("a paused worker labels existing queued work as blocked and prevents a resume control", async ({
   page,
 }) => {

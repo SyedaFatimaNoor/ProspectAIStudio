@@ -33,6 +33,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { browserSupabase } from "@/lib/browser-supabase";
 import { workerIsKnownPaused } from "@/lib/cloud-worker";
+import {
+  discoveryAvailability,
+  discoveryFixabilityLabel,
+  safeOperationalMessage,
+} from "@/lib/discovery-availability";
 import { displayNameSchema } from "@/lib/validation";
 import type { AIHealth } from "@/lib/ai";
 import type {
@@ -486,6 +491,10 @@ export default function Settings() {
                       (health) => health.provider === "worker",
                     )
                   : undefined;
+              const availability =
+                i.key === "discovery"
+                  ? discoveryAvailability(data, loading, connectionError)
+                  : null;
               const healthProviders = [
                 ...(i.key === "database" || i.key === "discovery"
                   ? [i.key]
@@ -514,6 +523,64 @@ export default function Settings() {
                       <dt>Reachability</dt>
                       <dd>{status.reachability}</dd>
                     </div>
+                    {availability && (
+                      <>
+                        <div>
+                          <dt>Discovery availability</dt>
+                          <dd>
+                            {availability.available
+                              ? "Available to queue bounded work"
+                              : "Discovery unavailable"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Exact reason</dt>
+                          <dd>{safeOperationalMessage(availability.reason)}</dd>
+                        </div>
+                        <div>
+                          <dt>Last worker activity</dt>
+                          <dd>
+                            {availability.lastWorkerActivity
+                              ? snapshotDate(availability.lastWorkerActivity)
+                              : "No worker activity recorded"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Last provider check</dt>
+                          <dd>
+                            {availability.lastProviderCheck
+                              ? `${snapshotDate(availability.lastProviderCheck.checked_at)} · ${availability.lastProviderCheck.status.replaceAll("_", " ")}`
+                              : "No provider check recorded"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Last HTTP status</dt>
+                          <dd>
+                            {availability.lastHttpStatus
+                              ? `HTTP ${availability.lastHttpStatus}`
+                              : "No HTTP status recorded"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Response time</dt>
+                          <dd>
+                            {typeof availability.responseTimeMs === "number"
+                              ? `${availability.responseTimeMs} ms`
+                              : "No response time recorded"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Recommended action</dt>
+                          <dd>{availability.recommendedAction}</dd>
+                        </div>
+                        <div>
+                          <dt>Who can fix this?</dt>
+                          <dd>
+                            {discoveryFixabilityLabel(availability.fixability)}
+                          </dd>
+                        </div>
+                      </>
+                    )}
                     {status.worker && (
                       <div>
                         <dt>Worker</dt>
@@ -551,7 +618,7 @@ export default function Settings() {
                     {status.lastError && (
                       <div>
                         <dt>Last worker outcome</dt>
-                        <dd>{status.lastError}</dd>
+                        <dd>{safeOperationalMessage(status.lastError)}</dd>
                       </div>
                     )}
                     {i.key === "discovery" && data.config.worker && (
@@ -613,8 +680,10 @@ export default function Settings() {
                         <div>
                           <dt>Last provider error</dt>
                           <dd>
-                            {data.config.worker.last_provider_error ||
-                              "No provider error recorded"}
+                            {safeOperationalMessage(
+                              data.config.worker.last_provider_error,
+                              "No provider error recorded",
+                            )}
                             {data.config.worker.last_error_category
                               ? ` (${data.config.worker.last_error_category.replaceAll("_", " ")})`
                               : ""}
@@ -655,12 +724,20 @@ export default function Settings() {
                         {providerHealth.last_error && (
                           <div>
                             <dt>Last health error</dt>
-                            <dd>{providerHealth.last_error}</dd>
+                            <dd>
+                              {safeOperationalMessage(
+                                providerHealth.last_error,
+                              )}
+                            </dd>
                           </div>
                         )}
                         <div>
                           <dt>Recommended action</dt>
-                          <dd>{providerHealth.recommended_action}</dd>
+                          <dd>
+                            {safeOperationalMessage(
+                              providerHealth.recommended_action,
+                            )}
+                          </dd>
                         </div>
                       </>
                     )}
@@ -689,12 +766,18 @@ export default function Settings() {
                         {workerHealth.last_error && (
                           <div>
                             <dt>Last scheduler check error</dt>
-                            <dd>{workerHealth.last_error}</dd>
+                            <dd>
+                              {safeOperationalMessage(workerHealth.last_error)}
+                            </dd>
                           </div>
                         )}
                         <div>
                           <dt>Scheduler guidance</dt>
-                          <dd>{workerHealth.recommended_action}</dd>
+                          <dd>
+                            {safeOperationalMessage(
+                              workerHealth.recommended_action,
+                            )}
+                          </dd>
                         </div>
                       </>
                     )}
@@ -757,9 +840,13 @@ export default function Settings() {
                     className="integration-configure"
                     onClick={() => setDetail(i.key)}
                   >
-                    {status.configured
-                      ? "View configuration"
-                      : "Setup & limitations"}
+                    {i.key === "discovery" &&
+                    availability &&
+                    !availability.available
+                      ? "View setup instructions"
+                      : status.configured
+                        ? "View configuration"
+                        : "Setup & limitations"}
                     <ArrowUpRight size={16} />
                   </button>
                 </div>
