@@ -18,6 +18,11 @@ export type Business = {
   outreach_status: string;
   notes: string;
   created_at: string;
+  /** Timestamp on the persisted source-provenance row, not a claim about business activity. */
+  source_observed_at?: string | null;
+  duplicate_group_id?: string | null;
+  duplicate_match_reason?: string | null;
+  duplicate_review_status?: string;
   facts: Record<string, unknown>;
 };
 export type Job = {
