@@ -14,6 +14,7 @@ import {
   PenLine,
   History,
   MonitorSmartphone,
+  RefreshCw,
 } from "lucide-react";
 import {
   PageHeading,
@@ -28,6 +29,28 @@ import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/workspace-provider";
 import { factBasedConcept } from "@/lib/proposal";
 import { download, formatDate } from "@/lib/utils";
+import type { AIConceptOutput } from "@/lib/ai-schema";
+import type { Proposal } from "@/lib/types";
+type ConceptMeta = {
+  provider: string;
+  model: string;
+  generated_at: string;
+  version: number;
+  proposal_id: string;
+};
+
+type GeneratedConceptResponse = {
+  content: string;
+  title: string;
+  provider: string;
+  model: string;
+  generated_at: string;
+  concept: AIConceptOutput;
+  facts_snapshot: unknown;
+  regenerated: boolean;
+  proposal: Proposal;
+};
+
 export default function Studio() {
   const { data, action, notify } = useWorkspace();
   const [leadId, setLeadId] = useState("");
@@ -35,6 +58,8 @@ export default function Studio() {
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  const [meta, setMeta] = useState<ConceptMeta | null>(null);
+  const [error, setError] = useState("");
   useEffect(() => {
     setLeadId(new URLSearchParams(window.location.search).get("lead") || "");
   }, []);
@@ -45,24 +70,46 @@ export default function Studio() {
     setTitle(`Website concept — ${lead.name}`);
     setContent(factBasedConcept(lead));
     setSelected(null);
+    setMeta(null);
+    setError("");
     notify(
       "Fact-based starting draft created. This is a template, not AI output.",
     );
   }
-  async function generate() {
+  async function generate(regenerate = false) {
     if (!lead) return;
     setBusy(true);
+    setError("");
     try {
       const result = (await action("generate_concept", {
         business_id: lead.id,
-      })) as { content: string };
+        ...(regenerate && meta
+          ? { regenerate: true, proposal_id: meta.proposal_id }
+          : {}),
+      })) as GeneratedConceptResponse;
       setContent(result.content);
-      setTitle(`Website concept — ${lead.name}`);
-      setSelected(null);
+      setTitle(result.title || `Website concept — ${lead.name}`);
+      setSelected(result.proposal?.id || null);
+      if (result.proposal && result.provider && result.model) {
+        setMeta({
+          provider: result.provider,
+          model: result.model,
+          generated_at: result.generated_at,
+          version: result.proposal.version,
+          proposal_id: result.proposal.id,
+        });
+      }
       notify(
-        "AI concept generated. Review all suggested content before saving.",
+        regenerate
+          ? "AI concept regenerated and saved. Review every suggestion before use."
+          : "AI concept generated and saved. Review every suggestion before use.",
       );
-    } catch {
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "AI provider is unavailable. No concept was saved.",
+      );
     } finally {
       setBusy(false);
     }
@@ -76,8 +123,19 @@ export default function Studio() {
         title,
         content,
         id: selected || undefined,
-      })) as { id: string };
-      if (saved.id) setSelected(saved.id);
+      })) as { id?: string; version?: number };
+      if (saved.id) {
+        setSelected(saved.id);
+        setMeta((current) =>
+          current
+            ? {
+                ...current,
+                proposal_id: saved.id!,
+                version: saved.version ?? current.version,
+              }
+            : current,
+        );
+      }
       notify("Proposal saved to your workspace.");
     } catch {
     } finally {
@@ -111,6 +169,8 @@ export default function Studio() {
                     setSelected(null);
                     setContent("");
                     setTitle("");
+                    setMeta(null);
+                    setError("");
                   }}
                 >
                   <option value="">Select a business…</option>
@@ -145,6 +205,11 @@ export default function Studio() {
                   <Link href={`/leads?lead=${lead.id}`}>Review lead</Link>
                 </Notice>
               )}
+              {error && (
+                <div role="alert">
+                  <Notice tone="error">{error}</Notice>
+                </div>
+              )}
               <Button
                 disabled={!verified || busy}
                 onClick={template}
@@ -159,6 +224,16 @@ export default function Studio() {
               >
                 {busy ? <Spinner /> : <Sparkles size={15} />}Generate with AI
               </Button>
+              {meta && (
+                <Button
+                  disabled={!verified || busy || !data.config.ai}
+                  onClick={() => void generate(true)}
+                  variant="outline"
+                >
+                  <RefreshCw size={15} />
+                  Regenerate with AI
+                </Button>
+              )}
               {!data.config.ai && (
                 <p className="field-help">
                   AI is optional and currently unconfigured. Use the editable
@@ -182,13 +257,32 @@ export default function Studio() {
                       setLeadId(p.business_id);
                       setTitle(p.title);
                       setContent(p.content);
+                      setError("");
+                      setMeta(
+                        p.origin === "ai" &&
+                          p.ai_provider &&
+                          p.ai_model &&
+                          p.generated_at
+                          ? {
+                              provider: p.ai_provider,
+                              model: p.ai_model,
+                              generated_at: p.generated_at,
+                              version: p.version,
+                              proposal_id: p.id,
+                            }
+                          : null,
+                      );
                     }}
                   >
                     <FileText size={18} />
                     <span>
                       <strong>{p.title}</strong>
                       <small>
-                        Revision {p.version} · {formatDate(p.created_at)}
+                        Revision {p.version} ·{" "}
+                        {p.origin === "ai" && p.ai_provider
+                          ? `AI · ${p.ai_provider} · ${p.ai_model || "model unrecorded"}`
+                          : "Manual"}{" "}
+                        · {formatDate(p.generated_at || p.created_at)}
                       </small>
                     </span>
                     <ChevronRight size={14} />
@@ -224,6 +318,15 @@ export default function Studio() {
                   maxLength={180}
                 />
               </Field>
+              {meta && (
+                <Notice>
+                  <strong>Saved AI concept · revision {meta.version}.</strong>{" "}
+                  Provider: {meta.provider} · Model: {meta.model} · Generated:{" "}
+                  {new Date(meta.generated_at).toLocaleString()}. This is an
+                  editable draft concept, not a built, published, or approved
+                  website. Verify uncertain information before use.
+                </Notice>
+              )}
               <Field label="Concept & proposal (Markdown)">
                 <textarea
                   aria-label="Concept and proposal"

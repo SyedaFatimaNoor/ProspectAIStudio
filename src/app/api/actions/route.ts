@@ -10,7 +10,12 @@ import {
   manualSchema,
   displayNameSchema,
 } from "@/lib/validation";
-import { CompatibleAI } from "@/lib/ai";
+import { AIProviderError, CompatibleAI } from "@/lib/ai";
+import {
+  generateAndSaveConcept,
+  type ConceptRepository,
+  type StoredConceptProposal,
+} from "@/lib/ai-workflow";
 import {
   checkProviderHealth,
   healthProviderSchema,
@@ -456,19 +461,67 @@ export async function POST(req: NextRequest) {
         break;
       }
       case "generate_concept": {
-        const b = await owned("businesses", idSchema.parse(input.business_id));
+        const business_id = idSchema.parse(input.business_id);
+        const regenerate = z
+          .boolean()
+          .optional()
+          .default(false)
+          .parse(input.regenerate);
+        const proposal_id = input.proposal_id
+          ? idSchema.parse(input.proposal_id)
+          : null;
+        const b = await owned("businesses", business_id);
         if (b.activity_status !== "verified_active")
           throw new Error(
             "Verify business activity before generating a concept.",
           );
-        const content = await new CompatibleAI().generateConcept({
-          name: b.name,
-          category: b.category,
-          city: b.city,
-          country: b.country,
+        // Regeneration targets only an owned AI concept for this same lead.
+        // Workspace/user identity always comes from the verified session.
+        let previous: { id: string; version: number } | null = null;
+        if (regenerate) {
+          if (proposal_id) {
+            const p = await owned("proposals", proposal_id);
+            if (p.business_id !== business_id || p.origin !== "ai")
+              throw new Error(
+                "Select a saved AI concept for this business to regenerate.",
+              );
+            previous = { id: p.id, version: p.version };
+          } else {
+            const { data, error } = await db
+              .from("pa_proposals")
+              .select("id,version")
+              .eq("user_id", user_id)
+              .eq("business_id", business_id)
+              .eq("origin", "ai")
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (error)
+              throw new Error(
+                `Unable to read saved AI concepts: ${error.message}`,
+              );
+            if (data) previous = { id: data.id, version: data.version };
+          }
+        }
+        const repository: ConceptRepository = {
+          insertProposal: async (values) =>
+            (await insert("proposals", values)) as StoredConceptProposal,
+          updateProposal: async (id, values) =>
+            (await update("proposals", id, values)) as StoredConceptProposal,
+        };
+        result = await generateAndSaveConcept({
+          rawLead: b,
+          provider: new CompatibleAI(),
+          repository,
+          previous,
         });
-        result = { content };
-        await audit(b.id);
+        await audit((result as { proposal: { id: string } }).proposal.id, {
+          provider: (result as { provider: string }).provider,
+          model: (result as { model: string }).model,
+          generated_at: (result as { generated_at: string }).generated_at,
+          regenerate,
+          facts_schema_version: 1,
+        });
         break;
       }
       case "test_provider": {
@@ -676,6 +729,11 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json(result, { headers: rateLimitHeaders(rate) });
   } catch (e) {
+    if (e instanceof AIProviderError)
+      return NextResponse.json(
+        { error: e.message, code: e.code },
+        { status: e.status },
+      );
     if (e instanceof z.ZodError) {
       const labels: Record<string, string> = {
         type: "Action",
