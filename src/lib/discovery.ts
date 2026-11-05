@@ -47,6 +47,7 @@ export function phoneKey(phone: string | null) {
   return (phone || "").replace(/\D/g, "");
 }
 export function domainKey(url: string | null) {
+  if (!url?.trim()) return "";
   try {
     return new URL(url?.startsWith("http") ? url : `https://${url}`).hostname
       .replace(/^www\./, "")
