@@ -115,6 +115,34 @@ export async function GET(req: NextRequest) {
       )
       .eq("user_id", user.id)
       .order("checked_at", { ascending: false });
+    const payload = Object.fromEntries(results) as Record<string, unknown>;
+    const loadedBusinesses = (payload.businesses || []) as { id: string }[];
+    const { data: sourceRows, error: sourceError } = loadedBusinesses.length
+      ? await db
+          .from("pa_business_sources")
+          .select("business_id,observed_at")
+          .eq("user_id", user.id)
+          .in(
+            "business_id",
+            loadedBusinesses.map((business) => business.id),
+          )
+          .order("observed_at", { ascending: false })
+      : { data: [], error: null };
+    if (sourceError)
+      throw new Error(
+        `Unable to load source provenance: ${sourceError.message}`,
+      );
+    const observedByBusiness = new Map<string, string>();
+    for (const source of sourceRows || []) {
+      if (!observedByBusiness.has(source.business_id))
+        observedByBusiness.set(source.business_id, source.observed_at);
+    }
+    const businesses = (payload.businesses as Record<string, unknown>[]).map(
+      (business) => ({
+        ...business,
+        source_observed_at: observedByBusiness.get(String(business.id)) || null,
+      }),
+    );
     const { data: profile, error: profileError } = await db
       .from("pa_profiles")
       .select("display_name,updated_at")
@@ -124,7 +152,8 @@ export async function GET(req: NextRequest) {
       throw new Error("Unable to load profile: " + profileError.message);
     return NextResponse.json(
       {
-        ...Object.fromEntries(results),
+        ...payload,
+        businesses,
         windowed: results.some((r) => Boolean(r[2])),
         user: {
           id: user.id,

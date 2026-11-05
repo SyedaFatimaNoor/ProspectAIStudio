@@ -103,6 +103,16 @@ export function LeadDetail({
           Verify evidence
         </Button>
       </div>
+      {lead.duplicate_group_id &&
+        lead.duplicate_review_status === "manual_review" && (
+          <Notice>
+            Possible duplicate:{" "}
+            {lead.duplicate_match_reason?.replaceAll("_", " ") ||
+              "matching evidence"}
+            . This record and its source provenance are preserved for manual
+            review.
+          </Notice>
+        )}
       <div className="confidence-grid">
         <div>
           <span>Business activity</span>
@@ -163,7 +173,10 @@ export function LeadDetail({
               <span>
                 <strong>{lead.provider}</strong>
                 <small>
-                  {lead.source_id} · observed {formatDate(lead.created_at)}
+                  {lead.source_id} · source observed{" "}
+                  {lead.source_observed_at
+                    ? formatDate(lead.source_observed_at)
+                    : "timestamp unavailable"}
                 </small>
               </span>
               <ExternalLink size={16} />

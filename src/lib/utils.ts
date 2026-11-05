@@ -27,17 +27,37 @@ export function exportBusinesses(
     category: string;
     city: string;
     country: string;
+    source_url?: string | null;
+    source_observed_at?: string | null;
     verification_status: string;
+    activity_confidence?: number;
+    website_confidence?: number;
   }[],
 ) {
+  // Deliberately whitelist business-facing fields. Provider tokens, user IDs,
+  // internal facts, and source credentials cannot enter this export.
   return [
-    ["Name", "Category", "City", "Country", "Verification"],
+    [
+      "Name",
+      "Category",
+      "City",
+      "Country",
+      "Source URL",
+      "Source observed at",
+      "Verification status",
+      "Activity confidence",
+      "Website confidence",
+    ],
     ...rows.map((b) => [
       b.name,
       b.category,
       b.city,
       b.country,
+      b.source_url || "",
+      b.source_observed_at || "",
       b.verification_status,
+      b.activity_confidence ?? "",
+      b.website_confidence ?? "",
     ]),
   ]
     .map((r) => r.map(csvCell).join(","))

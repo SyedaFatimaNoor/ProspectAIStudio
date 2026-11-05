@@ -100,7 +100,13 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
         });
         break;
       case "save_notes":
-        state.businesses[0].notes = v.notes;
+        state.businesses.find((business) => business.id === v.id)!.notes =
+          v.notes;
+        break;
+      case "delete_leads":
+        state.businesses = state.businesses.filter(
+          (business) => !v.ids.includes(business.id),
+        );
         break;
       case "verify":
         state.runs.push({

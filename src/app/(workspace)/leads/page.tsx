@@ -25,8 +25,15 @@ import { Button } from "@/components/ui/button";
 import { PageHeading, Badge, EmptyState, Notice } from "@/components/shared";
 import { LeadDetail } from "@/components/lead-detail";
 import { download, exportBusinesses, formatDate } from "@/lib/utils";
+import {
+  duplicateWarning,
+  filterAndSortLeads,
+  leadPage,
+  type LeadSort,
+} from "@/lib/leads";
 export default function Leads() {
-  const { data, action, notify, loading } = useWorkspace();
+  const { data, action, notify, loading, connectionError, refresh } =
+    useWorkspace();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   const [category, setCategory] = useState("all");
@@ -44,38 +51,18 @@ export default function Leads() {
     setDetail(p.get("lead"));
     if (p.get("status")) setStatus(p.get("status")!);
   }, []);
-  useEffect(() => setPage(1), [q, status, category]);
-  const rows = data.businesses
-    .filter(
-      (b) =>
-        (!q ||
-          `${b.name} ${b.city} ${b.country}`
-            .toLowerCase()
-            .includes(q.toLowerCase())) &&
-        (status === "all" ||
-          b.website_status === status ||
-          b.verification_status === status) &&
-        (category === "all" || b.category === category),
-    )
-    .sort((a, b) =>
-      sort === "name"
-        ? a.name.localeCompare(b.name)
-        : sort === "confidence"
-          ? b.activity_confidence - a.activity_confidence
-          : new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
-  const pages = Math.max(1, Math.ceil(rows.length / 10));
-  const visible = rows.slice((page - 1) * 10, page * 10);
+  useEffect(() => setPage(1), [q, status, category, sort]);
+  const rows = filterAndSortLeads(data.businesses, {
+    query: q,
+    websiteStatus: status,
+    category,
+    sort: sort as LeadSort,
+  });
+  const pageResult = leadPage(rows, page);
+  const pages = pageResult.pages;
+  const visible = pageResult.rows;
   const categories = [...new Set(data.businesses.map((b) => b.category))];
-  const duplicates = data.businesses.filter(
-    (b, i, all) =>
-      all.findIndex(
-        (x) =>
-          x.name.toLowerCase().replace(/\W/g, "") ===
-            b.name.toLowerCase().replace(/\W/g, "") &&
-          x.city.toLowerCase() === b.city.toLowerCase(),
-      ) !== i,
-  );
+  const duplicates = duplicateWarning(data.businesses);
   function toggle(id: string) {
     setSelected((s) =>
       s.includes(id) ? s.filter((x) => x !== id) : [...s, id],
@@ -172,9 +159,17 @@ export default function Leads() {
       </div>
       {duplicates.length > 0 && (
         <Notice>
-          {duplicates.length} possible name-and-location matches need review.
-          Source identifiers and exact fingerprints are automatically
-          deduplicated.
+          {duplicates.length} source-backed possible duplicate
+          {duplicates.length === 1 ? " needs" : "s need"} manual review. Records
+          remain separate; no evidence is merged automatically.
+        </Notice>
+      )}
+      {connectionError && (
+        <Notice>
+          Leads could not be loaded: {connectionError}
+          <Button variant="outline" size="sm" onClick={() => void refresh()}>
+            Retry
+          </Button>
         </Notice>
       )}
       <section className="panel leads-panel">
@@ -303,6 +298,7 @@ export default function Leads() {
                 <th>Location</th>
                 {columns.contact && <th>Public contact</th>}
                 <th>Website status</th>
+                <th>Source</th>
                 {columns.confidence && <th>Activity</th>}
                 <th>Verification</th>
                 {columns.discovered && <th>Discovered</th>}
@@ -335,6 +331,14 @@ export default function Leads() {
                       <span>
                         <strong>{b.name}</strong>
                         <small>{b.category.replaceAll("_", " ")}</small>
+                        {b.duplicate_group_id &&
+                          b.duplicate_review_status === "manual_review" && (
+                            <small className="muted">
+                              Possible duplicate ·{" "}
+                              {b.duplicate_match_reason?.replaceAll("_", " ") ||
+                                "manual review"}
+                            </small>
+                          )}
                       </span>
                     </button>
                   </td>
@@ -360,6 +364,25 @@ export default function Leads() {
                     >
                       {b.website_status.replaceAll("_", " ")}
                     </Badge>
+                  </td>
+                  <td>
+                    {b.source_url ? (
+                      <a
+                        href={b.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-link"
+                      >
+                        {b.provider} <ExternalLink size={12} />
+                      </a>
+                    ) : (
+                      <span className="muted">No source URL</span>
+                    )}
+                    <small>
+                      {b.source_observed_at
+                        ? `Observed ${formatDate(b.source_observed_at)}`
+                        : "Timestamp unavailable"}
+                    </small>
                   </td>
                   {columns.confidence && (
                     <td>
