@@ -97,12 +97,10 @@ Do **all** of the following before considering discovery restored:
    command with a service-role credential held only by the operator:
 
    ```bash
-   npm run osm:snapshot -- --file=.osm-cache/<country>.osm.pbf --country='<country>' --load
+   npm run osm:snapshot -- --file=.osm-cache/<country>.osm.pbf --country='<country>' --source-url='https://download.geofabrik.de/<region>/<country>-latest.osm.pbf' --load
    ```
 
-3. Check `select public.pa_osm_snapshot_status();`. It must show non-zero
-   places and businesses and a known snapshot date. Confirm matching ODbL
-   attribution remains in result facts.
+3. Add `--dataset-timestamp='<ISO-8601 time>'` only when the publisher provides it, then check `select public.pa_osm_snapshot_status();`. It must show non-zero places and businesses, `import_status: ready`, imported record counts, a `last_successful_import_at` time, source name/URL, and ODbL attribution. Confirm matching attribution remains in result facts.
 4. Set **only in server/Edge secret settings**: `OSM_SNAPSHOT=1` for the app
    worker and `PA_OSM_SNAPSHOT=1` for the Edge Function. Do not expose a
    service-role key, snapshot file, or any secret to the browser. Deploy the

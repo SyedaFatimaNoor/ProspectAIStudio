@@ -128,7 +128,8 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
           last_success_at:
             provider === "worker" ? null : "2026-11-05T09:00:00.000Z",
           latency_ms: 31,
-          last_error: provider === "worker" ? "TEST ONLY — worker paused" : null,
+          last_error:
+            provider === "worker" ? "TEST ONLY — worker paused" : null,
           recommended_action:
             provider === "worker"
               ? "TEST ONLY — configure a permitted source before enabling."
@@ -200,20 +201,25 @@ test("sign in exposes accessible account recovery and explains an expired callba
   await page.goto("/sign-in");
   await page.getByRole("button", { name: "Sign in to workspace" }).click();
   await expect(page.getByLabel("Email address")).toBeFocused();
-  await expect(page.getByRole("link", { name: "Forgot your password?" })).toHaveAttribute(
-    "href",
-    "/reset-password",
-  );
+  await expect(
+    page.getByRole("link", { name: "Forgot your password?" }),
+  ).toHaveAttribute("href", "/reset-password");
   await page
     .getByRole("button", { name: "Create an account", exact: true })
     .click();
   await expect(page.getByLabel("Password")).toHaveAttribute("minlength", "12");
   await page.goto("/sign-in?error=callback");
-  await expect(page.getByRole("status")).toContainText(/invalid or has expired/i);
+  await expect(page.getByRole("status")).toContainText(
+    /invalid or has expired/i,
+  );
   await page.getByRole("link", { name: "Forgot your password?" }).click();
   await expect(page).toHaveURL(/\/reset-password$/);
-  await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Send reset instructions" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Reset your password" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Send reset instructions" }),
+  ).toBeVisible();
 });
 test("settings records a bounded provider health check with an actionable result", async ({
   page,
@@ -234,6 +240,67 @@ test("settings records a bounded provider health check with an actionable result
   await expect(card).toContainText("TEST ONLY — no action needed.");
 });
 
+test("settings shows a clear warning for an empty OSM snapshot", async ({
+  page,
+}) => {
+  await mocked(page, {
+    config: {
+      database: true,
+      discovery: false,
+      ai: false,
+      snapshot: {
+        businesses: 0,
+        places: 0,
+        oldest_snapshot: null,
+        newest_snapshot: null,
+        import_status: "empty",
+      },
+    },
+  });
+  await page.goto("/settings");
+  const card = page
+    .locator(".integration-card")
+    .filter({ has: page.getByRole("heading", { name: "OpenStreetMap" }) });
+  await expect(card).toContainText("Warning — snapshot is empty");
+  await expect(card).toContainText("before enabling discovery");
+});
+
+test("settings displays OSM snapshot import counts and last successful import", async ({
+  page,
+}) => {
+  await mocked(page, {
+    config: {
+      database: true,
+      discovery: true,
+      ai: false,
+      snapshot: {
+        businesses: 12345,
+        places: 321,
+        oldest_snapshot: "2026-10-30",
+        newest_snapshot: "2026-11-01",
+        import_status: "ready",
+        source_name: "TEST ONLY — OpenStreetMap fixture",
+        source_url: "https://example.invalid/test-only.osm.pbf",
+        attribution:
+          "© OpenStreetMap contributors, Open Database License (ODbL)",
+        dataset_timestamp: "2026-11-01T00:00:00.000Z",
+        last_successful_import_at: "2026-11-05T12:00:00.000Z",
+        places_imported: 321,
+        businesses_imported: 12345,
+        last_import_error: null,
+      },
+    },
+  });
+  await page.goto("/settings");
+  const card = page
+    .locator(".integration-card")
+    .filter({ has: page.getByRole("heading", { name: "OpenStreetMap" }) });
+  await expect(card).toContainText("12,345 imported business records");
+  await expect(card).toContainText("321 places");
+  await expect(card).toContainText("last successful import");
+  await expect(card).toContainText("TEST ONLY — OpenStreetMap fixture");
+});
+
 test("AI settings health check shows only a returned provider reply", async ({
   page,
 }) => {
@@ -252,7 +319,9 @@ test("AI settings health check shows only a returned provider reply", async ({
     .filter({ has: page.getByRole("heading", { name: "Your AI provider" }) });
   await expect(card).toContainText("Actual reply");
   await expect(card).toContainText("gemma4:31b");
-  await expect(card).toContainText("TEST ONLY — actual provider fixture reply.");
+  await expect(card).toContainText(
+    "TEST ONLY — actual provider fixture reply.",
+  );
 });
 
 test("real unconfigured discovery is disabled and never reports success", async ({
@@ -425,16 +494,21 @@ test("unverified leads cannot generate proposals", async ({ page }) => {
     page.getByRole("button", { name: "Generate with AI" }),
   ).toBeDisabled();
 });
-test("outreach explains why a draft cannot start without a lead", async ({ page }) => {
+test("outreach explains why a draft cannot start without a lead", async ({
+  page,
+}) => {
   await mocked(page, { businesses: [] });
   await page.goto("/outreach");
   const newDraft = page.getByRole("button", { name: "New draft" });
   await expect(newDraft).toBeDisabled();
   await expect(newDraft).toHaveAttribute("title", /Create and review a lead/);
   await expect(
-    page.getByText("No draft can be addressed responsibly without a business record", {
-      exact: false,
-    }),
+    page.getByText(
+      "No draft can be addressed responsibly without a business record",
+      {
+        exact: false,
+      },
+    ),
   ).toBeVisible();
 });
 
