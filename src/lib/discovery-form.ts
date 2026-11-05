@@ -1,7 +1,7 @@
 import {
-  cloudPauseBlocksDiscovery,
-  pausedCloudWorkerMessage,
-} from "./cloud-worker";
+  discoveryAvailability,
+  safeOperationalMessage,
+} from "./discovery-availability";
 import { jobSchema } from "./validation";
 import type { Workspace } from "./types";
 
@@ -37,11 +37,13 @@ export function discoveryJobErrorMessage(error: string) {
   const legacy406 =
     "OpenStreetMap provider returned HTTP 406. Respect endpoint rate limits and retry later.";
   if (error.includes(legacy406))
-    return error.replace(
-      legacy406,
-      "OpenStreetMap provider returned HTTP 406. The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.",
+    return safeOperationalMessage(
+      error.replace(
+        legacy406,
+        "OpenStreetMap provider returned HTTP 406. The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.",
+      ),
     );
-  return error;
+  return safeOperationalMessage(error);
 }
 
 export function discoveryBlockReason(
@@ -49,27 +51,6 @@ export function discoveryBlockReason(
   loading = false,
   connectionError: string | null = null,
 ) {
-  if (loading)
-    return "Your workspace is still loading. Please try again once it is ready.";
-  if (connectionError || data.error)
-    return "Workspace connection failed. Refresh jobs and check the connection before trying again.";
-  if (!data.user)
-    return "Sign in to queue a search. Read-only preview does not save changes or run discovery.";
-  if (!data.config.database)
-    return "Database setup is required to save discovery jobs. View setup instructions in Settings.";
-  if (!data.config.discovery)
-    return (
-      data.config.discovery_error ||
-      "No discovery source is configured. Ask the operator to configure a permitted source in Settings. No search was run."
-    );
-  if (
-    cloudPauseBlocksDiscovery(
-      data.config.worker,
-      Boolean(data.config.self_hosted_worker),
-    )
-  )
-    return pausedCloudWorkerMessage;
-  // A missing status is not proof that a separately configured worker is down.
-  // Allow queuing, but explain the uncertainty instead of claiming live readiness.
-  return null;
+  const availability = discoveryAvailability(data, loading, connectionError);
+  return availability.available ? null : availability.reason;
 }

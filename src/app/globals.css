@@ -306,6 +306,11 @@ textarea {
   background: #fff5f5;
   border-color: #f3dddd;
 }
+.notice-success {
+  color: #486c56;
+  background: #f2faf5;
+  border-color: #dbeee1;
+}
 .spinner {
   animation: spin 1s linear infinite;
 }
@@ -1602,6 +1607,92 @@ textarea {
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.discovery-availability {
+  margin: 0 0 22px;
+  padding: 18px 20px;
+  border: 1px solid #f0ddcd;
+  border-radius: 9px;
+  background: #fffaf7;
+}
+.discovery-availability-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+.discovery-availability-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #efd9ca;
+  border-radius: 8px;
+  color: #a75d46;
+  background: #fff4ed;
+}
+.discovery-availability .eyebrow {
+  margin-bottom: 5px;
+  color: #9b614e;
+}
+.discovery-availability h2 {
+  margin: 0;
+  color: #765241;
+  font-size: 16px;
+  font-weight: 600;
+}
+.discovery-availability-heading p {
+  margin: 5px 0 0;
+  color: #765f55;
+  font-size: 11px;
+  line-height: 1.65;
+}
+.discovery-availability-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 17px 0 14px;
+  border: 1px solid #f0e3da;
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.55);
+}
+.discovery-availability-list > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid #f0e3da;
+  border-bottom: 1px solid #f0e3da;
+}
+.discovery-availability-list > div:nth-child(2n) {
+  border-right: 0;
+}
+.discovery-availability-list > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+.discovery-availability-list dt {
+  margin-bottom: 3px;
+  color: #79594c;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.discovery-availability-list dd {
+  margin: 0;
+  color: #69584f;
+  font-size: 10px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.discovery-availability-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #765341;
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .discovery-layout {
   display: grid;
@@ -6703,4 +6794,28 @@ textarea {
 .onboarding-connection .button {
   font-size: 13px;
   min-height: 36px;
+}
+
+@media (max-width: 600px) {
+  .discovery-availability {
+    padding: 15px;
+  }
+  .discovery-availability-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .discovery-availability-heading .badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .discovery-availability-list {
+    grid-template-columns: 1fr;
+  }
+  .discovery-availability-list > div,
+  .discovery-availability-list > div:nth-child(2n) {
+    border-right: 0;
+    border-bottom: 1px solid #f0e3da;
+  }
+  .discovery-availability-list > div:last-child {
+    border-bottom: 0;
+  }
 }
