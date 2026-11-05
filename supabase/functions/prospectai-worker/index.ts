@@ -8,6 +8,13 @@ import type {
   DiscoveredBusiness,
 } from "../../../src/lib/discovery";
 import { snapshotReadiness } from "../../../src/lib/source-readiness";
+import {
+  boundedResponseTime,
+  classifyWorkerFailure,
+  cloudWorkerVersion,
+  safeWorkerFailureDetail,
+  workerSource,
+} from "../../../src/lib/worker-lifecycle";
 
 // Native Web APIs only: single-file connector deployments must not depend on
 // runtime npm/GitHub imports. No credentials are ever bundled into this file.
@@ -160,6 +167,17 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
     } catch {
       return reply({ error: "Worker database configuration is missing" }, 503);
     }
+    const source = workerSource(snapshot, url?.toString());
+    try {
+      const heartbeat = await db.rpc("pa_cloud_heartbeat", {
+        p_source: source,
+        p_worker_version: cloudWorkerVersion,
+      });
+      if (heartbeat.error)
+        return reply({ error: "Worker health could not be recorded" }, 503);
+    } catch {
+      return reply({ error: "Worker health could not be recorded" }, 503);
+    }
     if (snapshot) {
       // Check aggregate readiness before claiming. An enabled snapshot flag alone
       // does not prove it contains source rows, and an empty source must never
@@ -186,7 +204,7 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
             console.error(
               JSON.stringify({
                 event: "cloud_source_pause_failed",
-                error: paused.error.message.slice(0, 500),
+                error_category: "database_error",
               }),
             );
           return reply(
@@ -208,9 +226,13 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
       }
     }
     let claimed: ReturnType<typeof claim> | null = null;
+    let sourceRequestStarted: number | null = null;
     try {
       // Request body is ignored: only the DB can select a tenant/job under a lease.
-      const { data, error } = await db.rpc("pa_cloud_claim");
+      const { data, error } = await db.rpc("pa_cloud_claim", {
+        p_source: source,
+        p_worker_version: cloudWorkerVersion,
+      });
       if (error) throw new Error(error.message);
       if (!data) return reply({ idle: true });
       claimed = claim(data);
@@ -218,6 +240,7 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
       if (job.provider !== "openstreetmap")
         throw new Error("Unsupported discovery provider");
       const input = parseCloudSearch(job);
+      sourceRequestStarted = performance.now();
       const rows = provider
         ? await provider.discover(input, deadline)
         : snapshot
@@ -227,11 +250,13 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
               deadline,
             )
           : await discoverOpenStreetMap(input, url!.toString(), deadline);
+      const responseTime = boundedResponseTime(sourceRequestStarted);
       if (deadline.aborted) throw new Error("Worker deadline exceeded");
       const committed = await db.rpc("pa_cloud_commit", {
         p_job: job.id,
         p_token: claimed.token,
         p_rows: rows,
+        p_response_time_ms: responseTime,
       });
       if (committed.error) throw new Error(committed.error.message);
       console.info(
@@ -243,29 +268,46 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
       );
       return reply({ result: committed.data, mode: "listing-only" });
     } catch (error) {
-      const message = (
-        error instanceof Error ? error.message : "Worker failed"
-      ).slice(0, 500);
+      const effectiveError = deadline.aborted
+        ? new Error("Worker deadline exceeded")
+        : error;
+      const failure = classifyWorkerFailure(effectiveError);
+      const message = safeWorkerFailureDetail(effectiveError, failure);
+      const responseTime =
+        sourceRequestStarted === null
+          ? null
+          : boundedResponseTime(sourceRequestStarted);
       if (claimed) {
         try {
           const failed = await db.rpc("pa_cloud_fail", {
             p_job: claimed.job.id,
             p_token: claimed.token,
             p_error: message,
+            p_error_category: failure.category,
+            p_response_time_ms: responseTime,
+            p_worker_version: cloudWorkerVersion,
           });
           if (failed.error) throw new Error("Failure logging unavailable");
         } catch {
           console.error(
-            "Failure could not be recorded; lease recovery will retry.",
+            JSON.stringify({
+              event: "cloud_failure_recording_failed",
+              error_category: "database_error",
+            }),
           );
         }
       }
       console.error(
-        JSON.stringify({ event: "cloud_worker_failed", error: message }),
+        JSON.stringify({
+          event: "cloud_worker_failed",
+          error_category: failure.category,
+          http_status: failure.httpStatus,
+        }),
       );
       return reply(
         {
-          error: "Discovery attempt failed. See job logs; retries are bounded.",
+          error:
+            "Discovery attempt failed. See job logs; retries are limited to safe transient errors.",
         },
         502,
       );

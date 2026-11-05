@@ -291,6 +291,74 @@ test("a blocked historical provider rejection is not mislabeled as rate limiting
   await expect(job).not.toContainText("Respect endpoint rate limits");
 });
 
+test("discovery distinguishes blocked jobs from rate-limited jobs and keeps the retry window honest", async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  state.config.worker = {
+    enabled: true,
+    mode: "listing-only",
+    lifecycle_state: "rate_limited",
+    paused: false,
+    running: false,
+    daily_limit: 20,
+    daily_attempts: 2,
+    interval_minutes: 5,
+    last_started_at: null,
+    last_finished_at: null,
+  };
+  state.jobs = [
+    {
+      id: "test-only-blocked-job",
+      country: "Pakistan",
+      city: "Karachi",
+      category: "cafe",
+      max_results: 1,
+      status: "blocked",
+      processed: 0,
+      total: 0,
+      error: "OpenStreetMap provider returned HTTP 406.",
+      error_category: "provider_blocked",
+      logs: ["TEST FIXTURE — blocked"],
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: "test-only-rate-limited-job",
+      country: "Pakistan",
+      city: "Lahore",
+      category: "cafe",
+      max_results: 1,
+      status: "rate_limited",
+      processed: 0,
+      total: 0,
+      error: "OpenStreetMap provider returned HTTP 429.",
+      error_category: "rate_limited",
+      next_retry_at: "2099-01-01T00:00:00.000Z",
+      logs: ["TEST FIXTURE — rate limited"],
+      created_at: new Date().toISOString(),
+    },
+  ];
+  await page.goto("/discovery");
+  const blocked = page.locator(".job-card").filter({ hasText: "Karachi" });
+  await expect(blocked).toContainText(
+    "Blocked after a provider or policy error",
+  );
+  await expect(blocked).toContainText(
+    "No automatic retry will run, including for HTTP 406",
+  );
+  const limited = page.locator(".job-card").filter({ hasText: "Lahore" });
+  await expect(limited).toContainText("Rate limited");
+  await expect(limited).toContainText(
+    "Automatic retry is scheduled no earlier than",
+  );
+  await expect(
+    limited.getByRole("button", { name: "Pause job" }),
+  ).toBeVisible();
+  await expect(limited.getByRole("button", { name: "Resume job" })).toHaveCount(
+    0,
+  );
+});
+
 test("settings separates preview configuration from worker scheduling and makes refresh scope explicit", async ({
   page,
 }) => {
@@ -318,6 +386,58 @@ test("settings separates preview configuration from worker scheduling and makes 
   await expect(page.getByRole("status")).toContainText(
     "This reads saved configuration and worker state; it does not probe external providers.",
   );
+});
+
+test("settings shows durable worker lifecycle, heartbeat and aggregate job health without identifiers", async ({
+  page,
+}) => {
+  const state = await workspace(page);
+  state.config.worker = {
+    enabled: false,
+    mode: "listing-only",
+    lifecycle_state: "blocked",
+    paused: true,
+    running: false,
+    daily_limit: 20,
+    daily_attempts: 2,
+    interval_minutes: 5,
+    provider_source: "openstreetmap:overpass-api.de",
+    worker_version: "7.0.0",
+    last_heartbeat_at: "2026-11-05T09:00:00.000Z",
+    last_started_at: "2026-11-05T08:59:00.000Z",
+    last_finished_at: "2026-11-05T09:00:00.000Z",
+    last_successful_job_at: "2026-11-04T09:00:00.000Z",
+    last_failed_job_at: "2026-11-05T09:00:00.000Z",
+    last_provider_error: "TEST ONLY — provider rejected HTTP 406",
+    last_error_category: "provider_blocked",
+    last_successful_job: {
+      completed_at: "2026-11-04T09:00:00.000Z",
+      result_count: 12,
+      duplicate_count: 3,
+      response_time_ms: 418,
+    },
+    last_failed_job: {
+      completed_at: "2026-11-05T09:00:00.000Z",
+      status: "blocked",
+      error_category: "provider_blocked",
+      response_time_ms: 211,
+    },
+  };
+  await page.goto("/settings");
+  const card = page
+    .locator(".integration-card")
+    .filter({ has: page.getByRole("heading", { name: "OpenStreetMap" }) });
+  await expect(card).toContainText("Worker lifecycle");
+  await expect(card).toContainText("paused · blocked");
+  await expect(card).toContainText("Last heartbeat");
+  await expect(card).toContainText("Worker version");
+  await expect(card).toContainText("7.0.0");
+  await expect(card).toContainText("openstreetmap:overpass-api.de");
+  await expect(card).toContainText("12 source records");
+  await expect(card).toContainText("3 duplicates");
+  await expect(card).toContainText("Last failed job");
+  await expect(card).toContainText("TEST ONLY — provider rejected HTTP 406");
+  await expect(card).not.toContainText("test-only-account");
 });
 
 test("server rejection stays inline, preserves input and permits an explicit retry without claiming source success", async ({

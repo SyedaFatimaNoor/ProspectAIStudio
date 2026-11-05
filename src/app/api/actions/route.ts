@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
           .from("pa_discovery_jobs")
           .select("id", { count: "exact", head: true })
           .eq("user_id", user_id)
-          .in("status", ["queued", "running"]);
+          .in("status", ["queued", "running", "rate_limited"]);
         if ((count || 0) >= 3)
           throw new Error(
             "Finish or cancel an existing job before starting another. Maximum 3 active jobs.",
@@ -245,8 +245,22 @@ export async function POST(req: NextRequest) {
         const j = await owned("discovery_jobs", id);
         if (["completed", "cancelled"].includes(j.status))
           throw new Error("A finished job cannot be changed.");
-        if (status === "queued" && !["paused", "failed"].includes(j.status))
-          throw new Error("Only paused or failed jobs can be resumed.");
+        if (
+          status === "queued" &&
+          !["paused", "failed", "blocked"].includes(j.status)
+        )
+          throw new Error(
+            "Only paused, failed, or reviewed blocked jobs can be resumed. Rate-limited jobs wait for their scheduled retry.",
+          );
+        if (
+          status === "queued" &&
+          j.error_category === "rate_limited" &&
+          j.next_retry_at &&
+          new Date(j.next_retry_at).getTime() > Date.now()
+        )
+          throw new Error(
+            "This job is rate limited and must wait for its scheduled retry window.",
+          );
         if (status === "queued") {
           const { data: worker, error: workerStatusError } = await db.rpc(
             "pa_cloud_worker_status",
@@ -257,12 +271,27 @@ export async function POST(req: NextRequest) {
           )
             throw new Error(pausedCloudWorkerMessage);
         }
-        if (status === "paused" && !["queued", "running"].includes(j.status))
-          throw new Error("Only queued or running jobs can be paused.");
+        if (
+          status === "paused" &&
+          !["queued", "running", "rate_limited"].includes(j.status)
+        )
+          throw new Error(
+            "Only queued, running, or rate-limited jobs can be paused.",
+          );
         result = await update("discovery_jobs", id, {
           status,
           ...(status === "queued"
-            ? { attempts: 0, next_retry_at: new Date().toISOString() }
+            ? {
+                attempts: 0,
+                next_retry_at: new Date().toISOString(),
+                error: null,
+                error_category: null,
+                started_at: null,
+                completed_at: null,
+                response_time_ms: null,
+                result_count: null,
+                duplicate_count: null,
+              }
             : {}),
           logs: [
             ...j.logs,

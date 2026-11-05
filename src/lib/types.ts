@@ -35,6 +35,14 @@ export type Job = {
   provider?: string;
   attempts?: number;
   next_retry_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  response_time_ms?: number | null;
+  result_count?: number | null;
+  duplicate_count?: number | null;
+  error_category?: string | null;
+  provider_source?: string | null;
+  worker_version?: string | null;
   updated_at?: string;
 };
 export type Proposal = {
@@ -88,6 +96,52 @@ export type ProviderHealthRecord = {
   last_error: string | null;
   recommended_action: string;
 };
+export type WorkerJobSummary = {
+  completed_at?: string | null;
+  provider?: string | null;
+  source?: string | null;
+  result_count?: number | null;
+  duplicate_count?: number | null;
+  response_time_ms?: number | null;
+  error_category?: string | null;
+  status?: string | null;
+};
+
+export type WorkerHealth = {
+  enabled: boolean;
+  mode: "listing-only";
+  lifecycle_state?:
+    | "configured"
+    | "reachable"
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "blocked"
+    | "paused"
+    | "rate_limited"
+    | string;
+  paused?: boolean;
+  running?: boolean;
+  daily_limit: number;
+  daily_attempts: number;
+  daily_remaining?: number;
+  interval_minutes: number;
+  provider_source?: string | null;
+  worker_version?: string | null;
+  last_heartbeat_at?: string | null;
+  last_started_at: string | null;
+  last_finished_at: string | null;
+  last_successful_at?: string | null;
+  last_successful_job_at?: string | null;
+  last_failed_job_at?: string | null;
+  last_provider_error?: string | null;
+  last_error_category?: string | null;
+  last_error?: string | null;
+  last_successful_job?: WorkerJobSummary | null;
+  last_failed_job?: WorkerJobSummary | null;
+};
+
 export type Workspace = {
   user: {
     id: string;
@@ -134,18 +188,7 @@ export type Workspace = {
       businesses_imported?: number;
       last_import_error?: string | null;
     };
-    worker?: {
-      enabled: boolean;
-      mode: "listing-only";
-      daily_limit: number;
-      daily_attempts: number;
-      daily_remaining?: number;
-      interval_minutes: number;
-      last_started_at: string | null;
-      last_finished_at: string | null;
-      last_successful_at?: string | null;
-      last_error?: string | null;
-    };
+    worker?: WorkerHealth;
   };
   windowed?: boolean;
   error?: string;
