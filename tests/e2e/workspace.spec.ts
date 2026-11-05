@@ -6,39 +6,42 @@ import {
   type Business,
   type ProviderHealthRecord,
 } from "../../src/lib/types";
-// Test-only HTTP fixtures. These are never bundled into application code or inserted into the live database.
-const id = "bf4941be-e03a-454b-905c-ae57c247e8e3";
+import {
+  outreachBusiness,
+  outreachRun,
+  publicOutreachPhone,
+} from "../outreach-fixtures";
+// Test-only HTTP fixtures. The business is a public source-backed lead; no row is inserted into the live database.
+const id = outreachBusiness.id;
 const fixture: Business = {
-  id,
-  name: "TEST ONLY — Fixture Café",
-  category: "cafe",
-  city: "Test City",
-  country: "Test Country",
-  phone: "+923001234567",
-  email: "fixture@example.invalid",
-  website: null,
-  source_url: "https://example.org/test-source",
-  provider: "test",
-  source_id: "test/1",
-  activity_status: "verified_active",
-  website_status: "manual_review",
-  activity_confidence: 85,
-  website_confidence: 20,
-  verification_status: "Verified active",
-  outreach_status: "Not contacted",
-  notes: "",
+  ...structuredClone(outreachBusiness),
   created_at: new Date().toISOString(),
-  facts: {},
 };
 async function mocked(page: Page, patch: Partial<Workspace> = {}) {
   const state: Workspace = {
     ...structuredClone(emptyWorkspace),
-    user: { id: "test-user", email: "test@example.invalid" },
+    user: { id: "test-only-account", email: "test@example.invalid" },
     businesses: [structuredClone(fixture)],
+    runs: [structuredClone(outreachRun)],
+    audit_logs: [],
     config: { database: true, discovery: true, ai: false },
     ...patch,
   };
-  await page.route("**/api/workspace", (r) => r.fulfill({ json: state }));
+  function addAudit(action: string, entityId: string) {
+    state.audit_logs.unshift({
+      id: `audit-${state.audit_logs.length + 1}`,
+      action,
+      entity_id: entityId,
+      detail: { workflow: "outreach", delivery: "not_attempted" },
+      created_at: new Date().toISOString(),
+    });
+  }
+  await page.route("**/api/workspace", (r) =>
+    r.fulfill({
+      json: state,
+      headers: { "cache-control": "no-store" },
+    }),
+  );
   await page.route("**/api/actions", async (route) => {
     const v = route.request().postDataJSON();
     switch (v.type) {
@@ -72,6 +75,7 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
           created_at: new Date().toISOString(),
         };
         state.messages = [m];
+        addAudit(v.id ? "Draft edited" : "Draft created", m.id);
         await route.fulfill({ json: m });
         return;
       }
@@ -88,7 +92,12 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
           return;
         }
         state.messages[0].status = "approved";
+        addAudit("Draft approved", state.messages[0].id);
         break;
+      case "export_outreach_draft":
+        addAudit("Draft exported", v.id);
+        await route.fulfill({ json: { ok: true, id: v.id, status: "draft" } });
+        return;
       case "suppress":
         state.suppressions.push({
           id: "suppression-test",
@@ -98,6 +107,7 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
         state.messages.forEach((m) => {
           if (m.recipient === v.contact) m.status = "suppressed";
         });
+        addAudit("Contact suppressed", "suppression-test");
         break;
       case "save_notes":
         state.businesses.find((business) => business.id === v.id)!.notes =
@@ -370,7 +380,7 @@ test("leads search, filters, column controls, selection and CSV export", async (
   await page.goto("/leads");
   await expect(
     page.getByRole("button", {
-      name: "Open TEST ONLY — Fixture Café",
+      name: "Open Café nt",
       exact: true,
     }),
   ).toBeVisible();
@@ -401,28 +411,9 @@ test("lead detail shows independent confidence, evidence provenance, notes and k
   page,
 }) => {
   const state = await mocked(page);
-  state.runs = [
-    {
-      id: "run-1",
-      business_id: id,
-      status: "completed",
-      explanation: "Test-only evidence explanation. No real verification.",
-      evidence: [
-        {
-          type: "Test evidence",
-          detail: "A test fixture, not a public claim.",
-          url: "https://example.org/test-evidence",
-          timestamp: new Date().toISOString(),
-        },
-      ],
-      created_at: new Date().toISOString(),
-      error: null,
-    },
-  ];
+  state.runs = [structuredClone(outreachRun)];
   await page.goto("/leads");
-  await page
-    .getByRole("button", { name: "Open TEST ONLY — Fixture Café", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Open Café nt", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(
     dialog.getByText("Business activity", { exact: true }),
@@ -431,7 +422,9 @@ test("lead detail shows independent confidence, evidence provenance, notes and k
     dialog.getByText("Official website", { exact: true }),
   ).toBeVisible();
   await expect(
-    dialog.getByText("Test evidence", { exact: true }),
+    dialog.getByText("OSM node tags supply the business name", {
+      exact: false,
+    }),
   ).toBeVisible();
   await dialog.getByRole("button", { name: "Notes", exact: true }).click();
   await dialog.getByLabel("Research notes").fill("Test-only research notes.");
@@ -451,6 +444,7 @@ test("verification centre opens evidence review and queues verification", async 
         verification_status: "Unverified",
       },
     ],
+    runs: [],
   });
   await page.goto("/verification");
   await page
@@ -556,13 +550,13 @@ test("opt-out records appear on suppression list", async ({ page }) => {
   await page
     .getByRole("button", { name: "Suppression list", exact: true })
     .click();
-  await page.getByLabel("Contact to suppress").fill("fixture@example.invalid");
+  await page.getByLabel("Contact to suppress").fill(publicOutreachPhone);
   await page
     .getByLabel("Opt-out reason")
     .fill("Test fixture requested no further contact");
   await page.getByRole("button", { name: "Record opt-out" }).click();
   await expect(
-    page.getByText("fixture@example.invalid", { exact: true }),
+    page.getByText(publicOutreachPhone, { exact: true }),
   ).toBeVisible();
   await expect(page.getByText("Do not contact", { exact: true })).toBeVisible();
   expect(state.suppressions.length).toBe(1);

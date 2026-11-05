@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Send,
   Mail,
@@ -15,6 +15,9 @@ import {
   AlertCircle,
   Download,
   StickyNote,
+  History,
+  Sparkles,
+  RefreshCw,
 } from "lucide-react";
 import { useWorkspace } from "@/components/workspace-provider";
 import {
@@ -24,12 +27,23 @@ import {
   Notice,
   Badge,
   EmptyState,
-  Spinner,
 } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { download, formatDate } from "@/lib/utils";
-import type { Message } from "@/lib/types";
+import { outreachEligibility, publicContactForChannel } from "@/lib/outreach";
+import type { Business, Message } from "@/lib/types";
+
+const EMPTY_FORM = {
+  id: "",
+  business_id: "",
+  channel: "email",
+  recipient: "",
+  subject: "",
+  body: "",
+  lawful_basis: "",
+};
+
 export default function Outreach() {
   const { data, action, notify } = useWorkspace();
   const [tab, setTab] = useState("drafts");
@@ -38,20 +52,16 @@ export default function Outreach() {
   const [busy, setBusy] = useState(false);
   const [contact, setContact] = useState("");
   const [reason, setReason] = useState("");
-  const [form, setForm] = useState({
-    id: "",
-    business_id: "",
-    channel: "email",
-    recipient: "",
-    subject: "",
-    body: "",
-    lawful_basis: "",
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [basis, setBasis] = useState("");
   const [approval, setApproval] = useState(false);
   const [messageNote, setMessageNote] = useState("");
   const [eventType, setEventType] = useState("note");
   const [savedSnapshot, setSavedSnapshot] = useState("");
+  const [error, setError] = useState("");
+  const [routeMessageId, setRouteMessageId] = useState<string | null>(null);
+  const hydratedRef = useRef<{ id: string; status: string } | null>(null);
+
   function snapshot(f: typeof form) {
     return JSON.stringify([
       f.business_id,
@@ -61,22 +71,41 @@ export default function Outreach() {
       f.body,
     ]);
   }
-  const lead = data.businesses.find((b) => b.id === form.business_id);
+  function syncOutreachUrl(id: string | null) {
+    const params = new URLSearchParams(window.location.search);
+    if (id) params.set("draft", id);
+    else params.delete("draft");
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+  }
+
+  const lead: Business | undefined = data.businesses.find(
+    (b) => b.id === form.business_id,
+  );
+  const eligibility = outreachEligibility({
+    business: lead,
+    channel: form.channel,
+    recipient: form.recipient,
+    suppressions: data.suppressions || [],
+    runs: data.runs || [],
+  });
+  const auditLogs = data.audit_logs || [];
+
   function newDraft() {
-    setForm({
-      id: "",
-      business_id: "",
-      channel: "email",
-      recipient: "",
-      subject: "",
-      body: "",
-      lawful_basis: "",
-    });
+    setForm(EMPTY_FORM);
     setEdit(true);
     setPreview(false);
     setApproval(false);
     setBasis("");
     setSavedSnapshot("");
+    setError("");
+    setRouteMessageId(null);
+    hydratedRef.current = null;
+    syncOutreachUrl(null);
   }
   function open(m: Message) {
     setForm({ ...m });
@@ -85,26 +114,63 @@ export default function Outreach() {
     setEdit(true);
     setPreview(false);
     setApproval(false);
+    setError("");
+    setRouteMessageId(m.id);
+    hydratedRef.current = { id: m.id, status: m.status };
+    syncOutreachUrl(m.id);
   }
   function pickLead(id: string) {
-    const b = data.businesses.find((b) => b.id === id);
-    setForm((f) => ({
-      ...f,
+    const b = data.businesses.find((item) => item.id === id);
+    if (!b) return;
+    const channel = b.phone ? "whatsapp" : "email";
+    const recipient = publicContactForChannel(b, channel);
+    setForm({
+      ...EMPTY_FORM,
       business_id: id,
-      recipient: f.channel === "email" ? b?.email || "" : b?.phone || "",
-      subject: `A website idea for ${b?.name || "your business"}`,
-      body: `Hello ${b?.name || "there"} team,\n\nI came across your public listing in ${b?.city || "your area"} and wanted to ask about your current online presence. Would a short conversation about a website concept be useful?\n\nThis is an initial idea, not a built or approved website.\n\n[Add your full name, business identity, and required contact/postal details before approval.]\n\nIf you prefer not to hear from me, please reply and I won’t contact you again.`,
-    }));
+      channel,
+      recipient,
+      subject: `A website idea for ${b.name}`,
+      body: `Hello ${b.name} team,\n\nI came across your public listing in ${b.city} and wanted to ask about your current online presence. Would a short conversation about a website concept be useful?\n\nThis is an initial idea, not a built or approved website.\n\n[Add your full name, business identity, and required contact/postal details before approval.]\n\nIf you prefer not to hear from me, please reply and I won’t contact you again.`,
+    });
+    setSavedSnapshot("");
+    setError("");
+    setRouteMessageId(null);
+    hydratedRef.current = null;
+    syncOutreachUrl(null);
+  }
+  function addPersonalisation() {
+    if (!lead) {
+      setError("Select a verified lead before adding personalisation.");
+      return;
+    }
+    const line = `Personalisation: Business: ${lead.name} · Category: ${lead.category.replaceAll("_", " ")} · Location: ${lead.city}, ${lead.country} · Source: ${lead.provider}${lead.source_observed_at ? ` (${lead.source_observed_at})` : ""}.`;
+    setForm((f) =>
+      f.body.includes(line) ? f : { ...f, body: `${f.body}\n\n${line}` },
+    );
+    setError("");
   }
   async function save() {
+    if (!eligibility.allowed) {
+      setError(eligibility.reason || "This lead is not eligible for outreach.");
+      return;
+    }
+    if (!form.subject.trim() || !form.body.trim()) {
+      setError("Add a subject and message before saving the draft.");
+      return;
+    }
     setBusy(true);
     try {
       const result = (await action("save_message", {
         ...form,
         id: form.id || undefined,
       })) as { id: string };
-      setForm((f) => ({ ...f, id: result.id }));
-      setSavedSnapshot(snapshot(form));
+      const next = { ...form, id: result.id };
+      setForm(next);
+      setSavedSnapshot(snapshot(next));
+      setRouteMessageId(result.id);
+      hydratedRef.current = { id: result.id, status: "draft" };
+      syncOutreachUrl(result.id);
+      setError("");
       notify("Outreach draft saved. Nothing has been sent.");
     } catch {
     } finally {
@@ -112,12 +178,38 @@ export default function Outreach() {
     }
   }
   async function approve() {
+    if (!form.id) {
+      setError("Save the draft before approval.");
+      return;
+    }
     setBusy(true);
     try {
       await action("approve_message", { id: form.id, lawful_basis: basis });
-      notify("Draft approved for review. Sending remains disabled.");
       setPreview(false);
       setEdit(false);
+      setError("");
+      hydratedRef.current = { id: form.id, status: "approved" };
+      syncOutreachUrl(form.id);
+      notify("Draft approved for review. Sending remains disabled.");
+    } catch {
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function exportDraft() {
+    if (!form.id) {
+      setError("Save the draft before exporting so the export can be audited.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await action("export_outreach_draft", { id: form.id });
+      download(
+        "outreach-draft.txt",
+        `To: ${form.recipient}\nSubject: ${form.subject}\n\n${form.body}`,
+      );
+      setError("");
+      notify("Draft exported and recorded. Nothing has been sent.");
     } catch {
     } finally {
       setBusy(false);
@@ -131,11 +223,30 @@ export default function Outreach() {
       notify("Opt-out recorded. Existing matching drafts are now suppressed.");
       setContact("");
       setReason("");
+      setError("");
+      setRouteMessageId(null);
+      hydratedRef.current = null;
+      syncOutreachUrl(null);
     } catch {
     } finally {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("draft");
+    setRouteMessageId(id);
+  }, []);
+  useEffect(() => {
+    if (!routeMessageId) return;
+    const m = data.messages.find((item) => item.id === routeMessageId);
+    if (!m) return;
+    const hydrated = hydratedRef.current;
+    if (hydrated && hydrated.id === m.id && hydrated.status === m.status)
+      return;
+    open(m);
+  }, [routeMessageId, data]);
+
   const filtered = data.messages.filter((m) =>
     tab === "approved"
       ? m.status === "approved"
@@ -143,6 +254,7 @@ export default function Outreach() {
         ? m.status === "sent"
         : ["draft", "suppressed", "failed"].includes(m.status),
   );
+
   return (
     <>
       <PageHeading
@@ -165,9 +277,9 @@ export default function Outreach() {
         </Button>
       </PageHeading>
       <Notice>
-        Sending is disabled. Prepare and approve individual drafts here; use an
-        authorised provider only after legal and platform-policy review. Public
-        contact details do not imply consent.
+        Sending remains disabled. Prepare, save, export, and approve individual
+        drafts here; no email or WhatsApp provider is authorised. Public contact
+        details do not imply consent.
       </Notice>
       {!data.businesses.length && (
         <Notice>
@@ -231,14 +343,14 @@ export default function Outreach() {
               <form className="form-stack" onSubmit={suppress}>
                 <Field
                   label="Contact to suppress"
-                  hint="Enter the exact email address or internationally formatted phone number."
+                  hint="Enter the exact opted-out email address or internationally formatted phone number."
                 >
                   <input
                     required
                     maxLength={200}
                     value={contact}
                     onChange={(e) => setContact(e.target.value)}
-                    placeholder="business@example.com or +923…"
+                    placeholder="Exact opted-out contact"
                   />
                 </Field>
                 <Field label="Opt-out reason">
@@ -279,7 +391,7 @@ export default function Outreach() {
               description={
                 tab === "sent"
                   ? "This workspace is intentionally draft-only. No provider is authorised to send messages."
-                  : "Choose a business, personalise your message, and review it before any outreach."
+                  : "Choose a verified, evidenced lead, personalise your message, and review it before any outreach."
               }
             />
           ) : (
@@ -347,6 +459,29 @@ export default function Outreach() {
               </li>
             </ul>
           </div>
+          <Panel
+            title="Outreach audit log"
+            description="Server-recorded workflow events. No message bodies or contact values."
+          >
+            <div
+              className="outreach-audit-log"
+              data-testid="outreach-audit-log"
+            >
+              {auditLogs.length ? (
+                auditLogs.slice(0, 8).map((entry) => (
+                  <div className="outreach-audit-row" key={entry.id}>
+                    <History size={15} />
+                    <span>
+                      <strong>{entry.action}</strong>
+                      <small>{formatDate(entry.created_at)}</small>
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p>No outreach audit events yet.</p>
+              )}
+            </div>
+          </Panel>
           <Panel title="Messaging integrations">
             <div className="integration-mini">
               <Mail size={19} />
@@ -428,6 +563,22 @@ export default function Outreach() {
           </div>
         ) : (
           <div className="panel-body form-stack">
+            {!eligibility.allowed && (
+              <div
+                className="outreach-gate"
+                data-testid="outreach-eligibility"
+                role="status"
+              >
+                <Notice tone="error">
+                  <span className="outreach-gate-title">
+                    <AlertCircle size={15} />
+                    Draft creation blocked
+                  </span>
+                  {eligibility.reason}
+                </Notice>
+              </div>
+            )}
+            {error && <Notice tone="error">{error}</Notice>}
             <div className="form-grid">
               <Field label="Business">
                 <select
@@ -446,16 +597,15 @@ export default function Outreach() {
               <Field label="Channel">
                 <select
                   value={form.channel}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const channel = e.target.value;
                     setForm((f) => ({
                       ...f,
-                      channel: e.target.value,
-                      recipient:
-                        e.target.value === "email"
-                          ? lead?.email || ""
-                          : lead?.phone || "",
-                    }))
-                  }
+                      channel,
+                      recipient: publicContactForChannel(lead, channel),
+                    }));
+                    setError("");
+                  }}
                 >
                   <option value="email">Email draft</option>
                   <option value="whatsapp">WhatsApp Business draft</option>
@@ -466,30 +616,28 @@ export default function Outreach() {
               label="Recipient"
               hint={
                 lead
-                  ? `Source: ${lead.provider} · ${lead.source_url || "review lead details"}`
+                  ? `Source: ${lead.provider} · ${lead.source_url || "review lead details"} · Use only the public contact recorded on this lead.`
                   : "Choose a business to view contact provenance."
               }
             >
               <input
                 value={form.recipient}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, recipient: e.target.value }))
-                }
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, recipient: e.target.value }));
+                  setError("");
+                }}
                 maxLength={200}
-                placeholder={
-                  form.channel === "email"
-                    ? "public-contact@example.com"
-                    : "+923…"
-                }
+                placeholder="Use the source-recorded public contact"
               />
             </Field>
             <Field label="Subject">
               <input
                 value={form.subject}
                 maxLength={200}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, subject: e.target.value }))
-                }
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, subject: e.target.value }));
+                  setError("");
+                }}
               />
             </Field>
             <Field label="Your message">
@@ -497,9 +645,10 @@ export default function Outreach() {
                 rows={10}
                 maxLength={10000}
                 value={form.body}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, body: e.target.value }))
-                }
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, body: e.target.value }));
+                  setError("");
+                }}
               />
             </Field>
             <div className="personalisation-hint">
@@ -519,6 +668,13 @@ export default function Outreach() {
                   {l} +
                 </button>
               ))}
+              <button
+                className="personalisation-action"
+                onClick={addPersonalisation}
+              >
+                <Sparkles size={14} />
+                Add personalization
+              </button>
             </div>
             {form.id && (
               <div className="form-grid">
@@ -584,13 +740,19 @@ export default function Outreach() {
             <div className="editor-footer">
               <Button
                 variant="outline"
-                disabled={!form.body}
-                onClick={() =>
-                  download(
-                    "outreach-draft.txt",
-                    `To: ${form.recipient}\nSubject: ${form.subject}\n\n${form.body}`,
-                  )
-                }
+                disabled={!form.id || busy}
+                onClick={() => {
+                  syncOutreachUrl(form.id);
+                  window.location.reload();
+                }}
+              >
+                <RefreshCw size={15} />
+                Reload draft
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!form.id || busy}
+                onClick={() => void exportDraft()}
               >
                 <Download size={15} />
                 Export draft
@@ -598,7 +760,10 @@ export default function Outreach() {
               <Button
                 variant="outline"
                 disabled={
-                  !form.business_id || !form.recipient || !form.body || busy
+                  !eligibility.allowed ||
+                  !form.subject.trim() ||
+                  !form.body.trim() ||
+                  busy
                 }
                 onClick={() => void save()}
               >
@@ -606,7 +771,12 @@ export default function Outreach() {
                 Save draft
               </Button>
               <Button
-                disabled={!form.id || busy || savedSnapshot !== snapshot(form)}
+                disabled={
+                  !form.id ||
+                  busy ||
+                  savedSnapshot !== snapshot(form) ||
+                  !eligibility.allowed
+                }
                 onClick={() => setPreview(true)}
               >
                 <Eye size={15} />

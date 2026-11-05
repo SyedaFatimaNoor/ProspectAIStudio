@@ -84,6 +84,13 @@ export type Evidence = {
   url?: string;
   timestamp: string;
 };
+export type AuditLog = {
+  id: string;
+  action: string;
+  entity_id: string | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+};
 export type Run = {
   id: string;
   business_id: string;
@@ -168,6 +175,7 @@ export type Workspace = {
   messages: Message[];
   runs: Run[];
   suppressions: { id: string; contact: string; reason: string }[];
+  audit_logs: AuditLog[];
   events: {
     event_type: string;
     message_id?: string;
@@ -214,6 +222,7 @@ export const emptyWorkspace: Workspace = {
   messages: [],
   runs: [],
   suppressions: [],
+  audit_logs: [],
   events: [],
   provider_health: [],
   settings: null,

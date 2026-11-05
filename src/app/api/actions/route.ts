@@ -37,6 +37,7 @@ import {
   takeRateLimit,
 } from "@/lib/rate-limit";
 import { rejectClientTenantOverride } from "@/lib/tenant-security";
+import { outreachEligibility } from "@/lib/outreach";
 export const maxDuration = 90;
 export async function POST(req: NextRequest) {
   try {
@@ -148,8 +149,13 @@ export async function POST(req: NextRequest) {
     async function audit(
       entity_id: string | null,
       detail: Record<string, unknown> = {},
+      actionLabel?: string,
     ) {
-      await insert("audit_logs", { action: type, entity_id, detail });
+      await insert("audit_logs", {
+        action: actionLabel || type,
+        entity_id,
+        detail,
+      });
     }
     async function saveProviderHealth(health: ProviderHealth) {
       const { data: prior, error: priorError } = await db!
@@ -587,16 +593,43 @@ export async function POST(req: NextRequest) {
       }
       case "save_message": {
         const v = messageSchema.parse(input);
-        await owned("businesses", v.business_id);
-        const { data: suppression } = await db
+        const business = await owned("businesses", v.business_id);
+        const { data: suppressionRows, error: suppressionError } = await db
           .from("pa_suppression_records")
-          .select("id")
-          .eq("user_id", user_id)
-          .eq("contact", v.recipient.toLowerCase().trim())
-          .maybeSingle();
-        if (suppression)
+          .select("contact")
+          .eq("user_id", user_id);
+        if (suppressionError)
           throw new Error(
-            "This recipient is on your suppression list. Do not contact them again.",
+            `Unable to read suppression records: ${suppressionError.message}`,
+          );
+        const { data: runRows, error: runError } = await db
+          .from("pa_verification_runs")
+          .select("business_id,status,evidence")
+          .eq("user_id", user_id)
+          .eq("business_id", v.business_id);
+        if (runError)
+          throw new Error(`Unable to read lead evidence: ${runError.message}`);
+        const { data: sourceRows, error: sourceError } = await db
+          .from("pa_business_sources")
+          .select("business_id,observed_at")
+          .eq("user_id", user_id)
+          .eq("business_id", v.business_id);
+        if (sourceError)
+          throw new Error(
+            `Unable to read source evidence: ${sourceError.message}`,
+          );
+        const eligibility = outreachEligibility({
+          business,
+          channel: v.channel,
+          recipient: v.recipient,
+          suppressions: suppressionRows || [],
+          runs: runRows || [],
+          sources: sourceRows || [],
+        });
+        if (!eligibility.allowed)
+          return NextResponse.json(
+            { error: eligibility.reason, code: eligibility.code },
+            { status: 409 },
           );
         const values = {
           business_id: v.business_id,
@@ -608,10 +641,35 @@ export async function POST(req: NextRequest) {
           approved_at: null,
         };
         if (v.id) {
-          await owned("outreach_messages", v.id);
+          const existing = await owned("outreach_messages", v.id);
+          if (existing.business_id !== v.business_id)
+            throw new Error(
+              "A draft cannot be reassigned to another business.",
+            );
           result = await update("outreach_messages", v.id, values);
-        } else result = await insert("outreach_messages", values);
-        await audit((result as { id: string }).id);
+          await audit(
+            (result as { id: string }).id,
+            {
+              message_id: v.id,
+              business_id: v.business_id,
+              channel: v.channel,
+              status: "draft",
+            },
+            "Draft edited",
+          );
+        } else {
+          result = await insert("outreach_messages", values);
+          await audit(
+            (result as { id: string }).id,
+            {
+              message_id: (result as { id: string }).id,
+              business_id: v.business_id,
+              channel: v.channel,
+              status: "draft",
+            },
+            "Draft created",
+          );
+        }
         break;
       }
       case "approve_message": {
@@ -637,6 +695,31 @@ export async function POST(req: NextRequest) {
           event_type: "approved",
           detail: "Human review; sending remains disabled.",
         });
+        await audit(
+          id,
+          {
+            message_id: id,
+            business_id: m.business_id,
+            status: "approved",
+          },
+          "Draft approved",
+        );
+        break;
+      }
+      case "export_outreach_draft": {
+        const id = idSchema.parse(input.id);
+        const m = await owned("outreach_messages", id);
+        await audit(
+          id,
+          {
+            message_id: id,
+            business_id: m.business_id,
+            status: m.status,
+            format: "text/plain",
+          },
+          "Draft exported",
+        );
+        result = { ok: true, id, status: m.status };
         break;
       }
       case "send_message":
@@ -666,7 +749,11 @@ export async function POST(req: NextRequest) {
           .single();
         if (error) throw error;
         result = r;
-        await audit(r.id);
+        await audit(
+          r.id,
+          { suppression_id: r.id, status: "opted_out" },
+          "Contact suppressed",
+        );
         break;
       }
       case "message_event": {
