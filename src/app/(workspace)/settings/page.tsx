@@ -65,8 +65,8 @@ const integrations = [
     description:
       "Community-maintained business listings with source attribution. No paid API key required.",
     icon: Globe2,
-    env: "OVERPASS_URL=https://overpass-api.de/api/interpreter",
-    help: "Three free sources, and none of them needs a paid key. OSM_SNAPSHOT=1 searches an OpenStreetMap extract imported into the workspace database; build it locally with npm run osm:snapshot -- --load --source-url=<exact extract URL>, and it is the only source that also works on serverless hosting. OSM_EXTRACT_PATH reads a country .osm.pbf from download.geofabrik.de on disk and runs only in a locally started worker. OVERPASS_URL needs an endpoint that accepts your network. Respect ODbL attribution; listings are never evidence of current operation.",
+    env: "OSM_SNAPSHOT=1",
+    help: "Three free sources, and none of them needs a paid key. OSM_SNAPSHOT=1 searches an OpenStreetMap extract imported into the workspace database; build it locally with npm run osm:snapshot -- --load --source-url=<exact extract URL>, and it is the only source that also works on serverless hosting. OSM_EXTRACT_PATH reads a country .osm.pbf from disk and runs only in a locally started worker. OVERPASS_URL needs an endpoint whose policy explicitly permits this workload; the shared public interpreter has returned a provider-side HTTP 406, so do not rotate endpoints or spoof identity to avoid the block. Respect ODbL attribution; listings are never evidence of current operation.",
     url: "https://wiki.openstreetmap.org/wiki/Overpass_API",
   },
   {
