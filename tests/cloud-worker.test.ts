@@ -288,10 +288,10 @@ test("shared portable provider preserves provenance and the Node fingerprint wit
     assert.equal(String(url), "https://example.invalid/overpass");
     assert.equal(init?.method, "POST");
     const headers = new Headers(init?.headers);
-    assert.equal(headers.get("accept"), "application/json");
+    assert.equal(headers.get("accept"), null);
     assert.match(
       headers.get("user-agent") || "",
-      /ProspectAIStudio\/1\.2.*prospectaistudio\.vercel\.app\/responsible-use/,
+      /ProspectAI\/1\.0.*prospectaistudio\.vercel\.app\/responsible-use/,
     );
     assert.equal(
       headers.get("content-type"),
@@ -337,12 +337,12 @@ test("shared portable provider preserves provenance and the Node fingerprint wit
 
 test("portable provider status messages distinguish denial from rate limiting", async () => {
   const { overpassFailureMessage } = await import("../src/lib/discovery-core");
-  assert.match(overpassFailureMessage(406), /endpoint rejected this request/);
+  assert.match(overpassFailureMessage(406), /safe request diagnostic/);
   assert.doesNotMatch(overpassFailureMessage(406), /rate limited/i);
   assert.match(overpassFailureMessage(429), /rate limited/i);
   assert.match(
     overpassFailureMessage(503),
-    /never treated as an empty successful search/,
+    /temporary server failure/,
   );
 });
 

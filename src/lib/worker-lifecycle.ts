@@ -53,7 +53,11 @@ export function classifyWorkerFailure(error: unknown): WorkerFailure {
       httpStatus: status,
       retryable: false,
     };
-  if (status === 429 || detail.category === "rate_limited")
+  if (
+    status === 429 ||
+    detail.category === "rate_limited" ||
+    detail.category === "provider_rate_limited"
+  )
     return { category: "rate_limited", httpStatus: status, retryable: true };
   if ([408, 425, 500, 502, 503, 504].includes(status || 0))
     return {
@@ -61,15 +65,27 @@ export function classifyWorkerFailure(error: unknown): WorkerFailure {
       httpStatus: status,
       retryable: true,
     };
-  if (detail.category === "provider_rejected")
+  if (
+    detail.category === "provider_rejected" ||
+    detail.category === "provider_bad_request" ||
+    detail.category === "provider_not_acceptable" ||
+    detail.category === "provider_policy_blocked"
+  )
     return {
       category: "provider_blocked",
       httpStatus: status,
       retryable: false,
     };
+  if (detail.category === "provider_server_error")
+    return {
+      category: "transient_provider",
+      httpStatus: status,
+      retryable: true,
+    };
 
   if (
     detail.category === "timeout" ||
+    detail.category === "provider_timeout" ||
     /deadline exceeded|timed out/i.test(message)
   )
     return { category: "timeout", httpStatus: status, retryable: true };
@@ -84,7 +100,9 @@ export function classifyWorkerFailure(error: unknown): WorkerFailure {
     detail.category === "invalid_json" ||
     detail.category === "invalid_response" ||
     detail.category === "incomplete_response" ||
-    detail.category === "response_too_large"
+    detail.category === "response_too_large" ||
+    detail.category === "provider_invalid_response" ||
+    detail.category === "provider_empty_response"
   )
     return {
       category: "invalid_response",

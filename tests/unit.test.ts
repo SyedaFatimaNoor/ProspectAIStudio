@@ -99,7 +99,7 @@ test("deduplication handles source IDs, fingerprints, phones and official domain
 });
 test("Overpass query is bounded and escapes user-controlled names", () => {
   const q = overpassQuery({ ...search, city: 'Test";out;[.*' });
-  assert.match(q, /timeout:35/);
+  assert.match(q, /timeout:25/);
   assert.match(q, /out meta center 75/);
   assert.ok(q.includes('\\"'));
   assert.ok(q.includes("\\\\."));

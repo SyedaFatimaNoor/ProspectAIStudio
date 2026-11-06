@@ -196,9 +196,11 @@ test("Outreach Centre completes the full draft workflow without sending", async 
     "Draft edited",
   );
 
+  const reloaded = page.waitForResponse("**/api/workspace");
   await page.goto("/outreach?draft=message-outreach&reload=1", {
     waitUntil: "domcontentloaded",
   });
+  await reloaded;
   dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible({ timeout: 30_000 });
   await expect(dialog.getByLabel("Subject")).toHaveValue(

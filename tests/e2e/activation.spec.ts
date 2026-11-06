@@ -345,8 +345,8 @@ test("a blocked historical provider rejection is not mislabeled as rate limiting
   ];
   await page.goto("/discovery");
   const job = page.locator(".job-card");
-  await expect(job).toContainText("A prior provider attempt failed");
-  await expect(job).toContainText("The endpoint rejected this request");
+  await expect(job).toContainText("Review the safe request diagnostic");
+  await expect(job).toContainText("No automatic retry will run");
   await expect(job).not.toContainText("Respect endpoint rate limits");
 });
 
