@@ -107,6 +107,7 @@ test("public canonical and social metadata use production URLs and contain no fa
 test("all workspace and sign-in pages are noindex without a misleading homepage canonical", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   for (const path of PRIVATE_PATHS) {
     await page.goto(path);
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute(

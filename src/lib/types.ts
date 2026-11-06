@@ -103,18 +103,29 @@ export type Run = {
 export type ProviderHealthRecord = {
   provider: "database" | "discovery" | "worker" | "ai" | "email" | "whatsapp";
   status:
-    | "reachable"
-    | "paused"
-    | "blocked"
     | "not_configured"
+    | "checking"
+    | "reachable"
+    | "blocked"
+    | "rate_limited"
+    | "timeout"
+    | "invalid_response"
+    | "unavailable"
+    | "paused"
     | "not_applicable"
-    | "unreachable"
-    | "rate_limited";
+    | "unreachable";
   checked_at: string;
   last_success_at: string | null;
   latency_ms: number | null;
   last_error: string | null;
   recommended_action: string;
+  provider_configured?: boolean | null;
+  provider_hostname?: string | null;
+  requested_at?: string | null;
+  response_time_ms?: number | null;
+  http_status?: number | null;
+  response_valid?: boolean | null;
+  last_failed_at?: string | null;
 };
 export type WorkerJobSummary = {
   completed_at?: string | null;

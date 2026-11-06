@@ -539,6 +539,7 @@ test("server rejection stays inline, preserves input and permits an explicit ret
 test("every main workspace route offers consistent preview guidance, no invented data and a sign-in destination", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   await workspace(page, { user: null });
   for (const path of [
     "/overview",

@@ -137,19 +137,27 @@ async function mocked(page: Page, patch: Partial<Workspace> = {}) {
         return;
       case "test_provider": {
         const provider = v.provider as "database" | "discovery" | "worker";
+        const checkedAt = "2026-11-05T09:00:00.000Z";
         const health: ProviderHealthRecord = {
           provider,
-          status: provider === "worker" ? "paused" : "reachable",
-          checked_at: "2026-11-05T09:00:00.000Z",
-          last_success_at:
-            provider === "worker" ? null : "2026-11-05T09:00:00.000Z",
+          status: provider === "worker" ? "unavailable" : "reachable",
+          checked_at: checkedAt,
+          requested_at: checkedAt,
+          last_success_at: provider === "worker" ? null : checkedAt,
+          last_failed_at: provider === "worker" ? checkedAt : null,
           latency_ms: 31,
+          response_time_ms: 31,
           last_error:
             provider === "worker" ? "TEST ONLY — worker paused" : null,
           recommended_action:
             provider === "worker"
               ? "TEST ONLY — configure a permitted source before enabling."
               : "TEST ONLY — no action needed.",
+          provider_configured: true,
+          provider_hostname:
+            provider === "discovery" ? "overpass-api.de" : null,
+          http_status: provider === "worker" ? null : 200,
+          response_valid: provider !== "worker",
         };
         state.provider_health = [
           ...state.provider_health.filter((row) => row.provider !== provider),
@@ -250,9 +258,16 @@ test("settings records a bounded provider health check with an actionable result
   await card
     .getByRole("button", { name: "Test provider connection", exact: true })
     .click();
+  await expect(card).toContainText("Provider configured");
   await expect(card).toContainText("Last provider check");
   await expect(card).toContainText("reachable");
+  await expect(card).toContainText("HTTP status");
+  await expect(card).toContainText("HTTP 200");
   await expect(card).toContainText("Response time");
+  await expect(card).toContainText("31 ms");
+  await expect(card).toContainText("Response valid");
+  await expect(card).toContainText("Last error");
+  await expect(card).toContainText("Recommended action");
   await expect(card).toContainText("TEST ONLY — no action needed.");
 });
 

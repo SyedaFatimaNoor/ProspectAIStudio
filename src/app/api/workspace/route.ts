@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
     const { data: providerHealth, error: providerHealthError } = await db
       .from("pa_provider_health")
       .select(
-        "provider,status,checked_at,last_success_at,latency_ms,last_error,recommended_action",
+        "provider,status,checked_at,requested_at,last_success_at,last_failed_at,latency_ms,response_time_ms,last_error,recommended_action,provider_configured,provider_hostname,http_status,response_valid",
       )
       .eq("user_id", user.id)
       .order("checked_at", { ascending: false });
