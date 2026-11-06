@@ -40,7 +40,7 @@ export function discoveryJobErrorMessage(error: string) {
     return safeOperationalMessage(
       error.replace(
         legacy406,
-        "OpenStreetMap provider returned HTTP 406. The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.",
+        "OpenStreetMap provider returned HTTP 406. Review the safe request diagnostic to identify whether this is content negotiation or a provider policy block; automatic retries are paused pending operator review.",
       ),
     );
   return safeOperationalMessage(error);

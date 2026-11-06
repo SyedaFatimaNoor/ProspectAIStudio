@@ -13,6 +13,30 @@ test("worker lifecycle classifies only safe transient provider failures for retr
     assert.equal(failure.category, "provider_blocked");
     assert.equal(failure.retryable, false);
   }
+  for (const category of [
+    "provider_bad_request",
+    "provider_not_acceptable",
+    "provider_policy_blocked",
+  ]) {
+    assert.deepEqual(
+      classifyWorkerFailure({ message: "Provider diagnostic", category }),
+      { category: "provider_blocked", httpStatus: null, retryable: false },
+    );
+  }
+  assert.equal(
+    classifyWorkerFailure({
+      message: "Provider diagnostic",
+      category: "provider_invalid_response",
+    }).retryable,
+    false,
+  );
+  assert.equal(
+    classifyWorkerFailure({
+      message: "Provider diagnostic",
+      category: "provider_server_error",
+    }).retryable,
+    true,
+  );
   assert.deepEqual(classifyWorkerFailure(new Error("Provider HTTP 429")), {
     category: "rate_limited",
     httpStatus: 429,

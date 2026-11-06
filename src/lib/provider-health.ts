@@ -4,7 +4,17 @@ import {
   extractPathConfigured,
   snapshotEnabled,
 } from "./discovery";
-import { overpassRequestHeaders } from "./discovery-core";
+import {
+  OverpassProviderError,
+  categoryForStatus,
+  logOverpassDiagnostic,
+  overpassEndpointUrl,
+  overpassHealthTimeoutMs,
+  overpassRequestInit,
+  overpassRequestLog,
+  readBoundedProviderResponse,
+  type OverpassErrorCategory,
+} from "./overpass-request";
 
 export const healthProviderSchema = [
   "database",
@@ -175,26 +185,83 @@ export async function checkProviderHealth(
         "Set only an endpoint whose policy explicitly permits this bounded workload, or use the snapshot path.",
     });
 
-  try {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: overpassRequestHeaders(),
-      body: new URLSearchParams({
-        data: "[out:json][timeout:8];node(0,0,0,0);out 1;",
+  const requestId = crypto.randomUUID();
+  const diagnosticStarted = performance.now();
+  const method = "GET" as const;
+  const query = "[out:json][timeout:8];node(0,0,0,0);out 1;";
+  const record = (
+    url: URL,
+    status: number | null,
+    category: OverpassErrorCategory,
+    details: {
+      contentType?: string | null;
+      bodyLength?: number;
+      excerpt?: string;
+      includeBodyExcerpt?: boolean;
+    } = {},
+  ) =>
+    logOverpassDiagnostic(
+      overpassRequestLog({
+        url,
+        method,
+        requestId,
+        started: diagnosticStarted,
+        status,
+        category,
+        ...details,
       }),
-      signal: AbortSignal.timeout(12_000),
-    });
-    if (!response.ok)
+    );
+  try {
+    const url = overpassEndpointUrl(endpoint, query, method);
+    const response = await fetch(
+      url,
+      overpassRequestInit(
+        method,
+        query,
+        AbortSignal.timeout(overpassHealthTimeoutMs),
+      ),
+    );
+    const bounded = await readBoundedProviderResponse(response);
+    const details = {
+      contentType: bounded.contentType,
+      bodyLength: bounded.length,
+      excerpt: bounded.excerpt,
+    };
+    if (!response.ok) {
+      const category = categoryForStatus(response.status, bounded.excerpt);
+      record(url, response.status, category, {
+        ...details,
+        includeBodyExcerpt: true,
+      });
       return completed(provider, started, sourceHealthStatus(response.status), {
         last_success_at: null,
         last_error: `OpenStreetMap provider returned HTTP ${response.status}.`,
         recommended_action:
           response.status === 429
             ? "Wait for the provider's stated retry window; do not rotate endpoints to evade a limit."
-            : "Review the provider policy/configuration. Keep scheduling paused until the source explicitly accepts this workload.",
+            : "Review the safe request diagnostic and provider policy/configuration. Keep scheduling paused until the source explicitly accepts this workload.",
       });
-    const payload = (await response.json()) as { elements?: unknown };
-    if (!Array.isArray(payload.elements))
+    }
+    if (!bounded.body.trim()) {
+      record(url, response.status, "provider_empty_response", {
+        ...details,
+        includeBodyExcerpt: true,
+      });
+      return completed(provider, started, "unreachable", {
+        last_success_at: null,
+        last_error: "OpenStreetMap provider returned an empty health response.",
+        recommended_action:
+          "Check the configured endpoint and response format before scheduling work.",
+      });
+    }
+    let payload: { elements?: unknown };
+    try {
+      payload = JSON.parse(bounded.body) as { elements?: unknown };
+    } catch {
+      record(url, response.status, "provider_invalid_response", {
+        ...details,
+        includeBodyExcerpt: true,
+      });
       return completed(provider, started, "unreachable", {
         last_success_at: null,
         last_error:
@@ -202,6 +269,24 @@ export async function checkProviderHealth(
         recommended_action:
           "Check the configured endpoint response format before scheduling work.",
       });
+    }
+    if (!Array.isArray(payload.elements)) {
+      record(url, response.status, "provider_invalid_response", {
+        ...details,
+        includeBodyExcerpt: true,
+      });
+      return completed(provider, started, "unreachable", {
+        last_success_at: null,
+        last_error:
+          "OpenStreetMap provider returned an invalid health response.",
+        recommended_action:
+          "Check the configured endpoint response format before scheduling work.",
+      });
+    }
+    record(url, response.status, "success", {
+      ...details,
+      includeBodyExcerpt: false,
+    });
     return completed(provider, started, "reachable", {
       last_success_at: new Date().toISOString(),
       last_error: null,
@@ -211,6 +296,15 @@ export async function checkProviderHealth(
   } catch (cause) {
     const timeout =
       cause instanceof DOMException && cause.name === "TimeoutError";
+    if (cause instanceof OverpassProviderError) {
+      // Endpoint validation failed before a URL could be trusted for logging.
+      return completed(provider, started, "unreachable", {
+        last_success_at: null,
+        last_error: "Invalid permitted Overpass endpoint configuration.",
+        recommended_action:
+          "Set a credential-free HTTPS interpreter URL whose policy permits this bounded workload.",
+      });
+    }
     return completed(provider, started, "unreachable", {
       last_success_at: null,
       last_error: timeout

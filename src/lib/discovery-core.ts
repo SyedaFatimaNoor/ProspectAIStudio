@@ -1,6 +1,33 @@
 // Portable source adapter: native Web APIs only, suitable for Node and Supabase Edge.
 // All provider responses are untrusted and bounded before parsing; no business URL is fetched.
 import type { SearchInput, DiscoveredBusiness } from "./discovery";
+import {
+  OverpassProviderError,
+  categoryForStatus,
+  logOverpassDiagnostic,
+  overpassDiscoveryTimeoutMs,
+  overpassEndpoint,
+  overpassEndpointUrl,
+  overpassFailureMessage,
+  overpassQueryTimeoutSeconds,
+  overpassReferer,
+  overpassRequestInit,
+  overpassRequestLog,
+  overpassUserAgent,
+  readBoundedProviderResponse,
+  type OverpassErrorCategory,
+  type OverpassRequestLog,
+} from "./overpass-request";
+
+export {
+  OverpassProviderError,
+  overpassEndpoint,
+  overpassFailureMessage,
+  overpassReferer,
+  overpassUserAgent,
+  type OverpassErrorCategory,
+  type OverpassRequestLog,
+} from "./overpass-request";
 
 export function normalise(value: string) {
   return value
@@ -144,62 +171,7 @@ export function overpassQuery(input: SearchInput) {
   const country = JSON.stringify(`^${regex(input.country)}$`);
   const city = JSON.stringify(`^${regex(input.city)}$`);
   const [key, value] = categoryTag[input.category];
-  return `[out:json][timeout:35];(area["admin_level"="2"]["name"~${country},i];area["admin_level"="2"]["name:en"~${country},i];)->.country;(rel(area.country)["name"~${city},i]["boundary"="administrative"];rel(area.country)["name:en"~${city},i]["boundary"="administrative"];)->.city_rel;.city_rel map_to_area->.city;nwr(area.city)["${key}"="${value}"]["name"];out meta center ${Math.min(300, input.max_results * 3)};`;
-}
-
-export const overpassReferer =
-  "https://prospectaistudio.vercel.app/responsible-use";
-export const overpassUserAgent =
-  "ProspectAIStudio/1.2 (+https://prospectaistudio.vercel.app/responsible-use)";
-
-/**
- * The public interpreter accepts regular form posts. A stable product URL in
- * both identifying headers gives an operator a way to identify the workload;
- * it is not a substitute for permission, rate limits, or a private endpoint.
- */
-export function overpassRequestHeaders() {
-  return {
-    Accept: "application/json",
-    "Content-Type": "application/x-www-form-urlencoded",
-    "User-Agent": overpassUserAgent,
-    Referer: overpassReferer,
-  };
-}
-
-export type OverpassErrorCategory =
-  | "success"
-  | "empty_result"
-  | "provider_rejected"
-  | "rate_limited"
-  | "timeout"
-  | "cancelled"
-  | "network_error"
-  | "invalid_json"
-  | "invalid_response"
-  | "incomplete_response"
-  | "response_too_large";
-
-export type OverpassRequestLog = {
-  provider: "openstreetmap";
-  endpoint_hostname: string;
-  request_id: string;
-  http_status: number | null;
-  response_time_ms: number;
-  error_category: OverpassErrorCategory;
-};
-
-export class OverpassProviderError extends Error {
-  constructor(
-    message: string,
-    readonly category: Exclude<
-      OverpassErrorCategory,
-      "success" | "empty_result"
-    >,
-    readonly status: number | null = null,
-  ) {
-    super(message);
-    this.name = "OverpassProviderError";
-  }
+  return `[out:json][timeout:${overpassQueryTimeoutSeconds}];(area["admin_level"="2"]["name"~${country},i];area["admin_level"="2"]["name:en"~${country},i];)->.country;(rel(area.country)["name"~${city},i]["boundary"="administrative"];rel(area.country)["name:en"~${city},i]["boundary"="administrative"];)->.city_rel;.city_rel map_to_area->.city;nwr(area.city)["${key}"="${value}"]["name"];out meta center ${Math.min(300, input.max_results * 3)};`;
 }
 
 type OverpassRequestOptions = {
@@ -209,43 +181,35 @@ type OverpassRequestOptions = {
   log?: (entry: OverpassRequestLog) => void;
 };
 
-function categoryForStatus(status: number): OverpassErrorCategory {
-  if (status === 429) return "rate_limited";
-  if ([400, 401, 403, 404, 405, 406, 410, 422].includes(status))
-    return "provider_rejected";
-  return "network_error";
-}
-
+/**
+ * Emits a safe diagnostic for every provider request. Error responses include
+ * a bounded, sanitised excerpt; successful JSON is represented only by a marker.
+ */
 function safeProviderLog(
   options: OverpassRequestOptions,
   url: URL,
+  method: "GET" | "POST",
   requestId: string,
   started: number,
   status: number | null,
   category: OverpassErrorCategory,
+  details: {
+    contentType?: string | null;
+    bodyLength?: number;
+    excerpt?: string;
+    includeBodyExcerpt?: boolean;
+  } = {},
 ) {
-  const event: OverpassRequestLog = {
-    provider: "openstreetmap",
-    endpoint_hostname: url.hostname,
-    request_id: requestId,
-    http_status: status,
-    response_time_ms: Math.max(0, Math.round(performance.now() - started)),
-    error_category: category,
-  };
-  // Deliberately logs no URL path/query, request body, response body, listing,
-  // contact, credential, or cookie data.
-  (options.log || ((entry) => console.info(JSON.stringify(entry))))(event);
-}
-
-export function overpassFailureMessage(status: number) {
-  const prefix = `OpenStreetMap provider returned HTTP ${status}.`;
-  if (status === 406)
-    return `${prefix} The endpoint rejected this request; do not retry automatically or rotate endpoints. Review provider policy/configuration before any operator-led retry.`;
-  if (status === 429)
-    return `${prefix} The provider rate limited this request; the worker will use bounded backoff.`;
-  if ([400, 401, 403, 404, 405, 410, 422].includes(status))
-    return `${prefix} The endpoint rejected this request; automatic retries are paused pending operator review of provider policy/configuration.`;
-  return `${prefix} The provider did not complete the request; retries are bounded and never treated as an empty successful search.`;
+  const event = overpassRequestLog({
+    url,
+    method,
+    requestId,
+    started,
+    status,
+    category,
+    ...details,
+  });
+  (options.log || logOverpassDiagnostic)(event);
 }
 
 export async function discoverOpenStreetMap(
@@ -254,47 +218,59 @@ export async function discoverOpenStreetMap(
   signal?: AbortSignal,
   options: OverpassRequestOptions = {},
 ): Promise<DiscoveredBusiness[]> {
+  const method = "POST" as const;
   if (!endpoint)
     throw new OverpassProviderError(
       "No Overpass endpoint configured. No source was queried.",
       "network_error",
     );
-  let url: URL;
-  try {
-    url = new URL(endpoint);
-  } catch {
-    throw new OverpassProviderError(
-      "Invalid Overpass endpoint.",
-      "network_error",
-    );
-  }
-  if (url.protocol !== "https:" || url.username || url.password)
-    throw new OverpassProviderError(
-      "Invalid Overpass endpoint. HTTPS with no embedded credentials is required.",
-      "network_error",
-    );
-
   const requestId = options.requestId || crypto.randomUUID();
   const started = performance.now();
-  const timeout = AbortSignal.timeout(options.timeoutMs || 30_000);
+  const query = overpassQuery(input);
+  let url: URL;
+  try {
+    url = overpassEndpointUrl(endpoint, query, method);
+  } catch (cause) {
+    safeProviderLog(
+      options,
+      new URL("https://invalid.invalid"),
+      method,
+      requestId,
+      started,
+      null,
+      "provider_bad_request",
+    );
+    throw cause;
+  }
+  const timeout = AbortSignal.timeout(
+    options.timeoutMs || overpassDiscoveryTimeoutMs,
+  );
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   let response: Response;
+  let bounded: Awaited<ReturnType<typeof readBoundedProviderResponse>>;
   try {
-    response = await (options.fetch || fetch)(url, {
-      method: "POST",
-      headers: overpassRequestHeaders(),
-      body: new URLSearchParams({ data: overpassQuery(input) }),
-      signal: requestSignal,
-    });
+    response = await (options.fetch || fetch)(
+      url,
+      overpassRequestInit(method, query, requestSignal),
+    );
+    bounded = await readBoundedProviderResponse(response);
   } catch (cause) {
     const category: OverpassErrorCategory = timeout.aborted
-      ? "timeout"
+      ? "provider_timeout"
       : signal?.aborted
         ? "cancelled"
         : "network_error";
-    safeProviderLog(options, url, requestId, started, null, category);
+    safeProviderLog(
+      options,
+      url,
+      method,
+      requestId,
+      started,
+      null,
+      category,
+    );
     throw new OverpassProviderError(
-      category === "timeout"
+      category === "provider_timeout"
         ? "OpenStreetMap provider request timed out. No search result was created."
         : category === "cancelled"
           ? "OpenStreetMap provider request was cancelled. No search result was created."
@@ -303,123 +279,120 @@ export async function discoverOpenStreetMap(
     );
   }
 
+  const status = response.status;
   if (!response.ok) {
-    const category = categoryForStatus(response.status);
+    const category = categoryForStatus(status, bounded.excerpt);
     safeProviderLog(
       options,
       url,
+      method,
       requestId,
       started,
-      response.status,
+      status,
       category,
+      {
+        contentType: bounded.contentType,
+        bodyLength: bounded.length,
+        excerpt: bounded.excerpt,
+        includeBodyExcerpt: true,
+      },
     );
     throw new OverpassProviderError(
-      overpassFailureMessage(response.status),
-      category === "success" || category === "empty_result"
-        ? "network_error"
-        : category,
-      response.status,
+      overpassFailureMessage(status, category),
+      category,
+      status,
     );
   }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
+  if (bounded.tooLarge) {
     safeProviderLog(
       options,
       url,
+      method,
       requestId,
       started,
-      response.status,
-      "invalid_response",
+      status,
+      "provider_invalid_response",
+      {
+        contentType: bounded.contentType,
+        bodyLength: bounded.length,
+        excerpt: bounded.excerpt,
+        includeBodyExcerpt: true,
+      },
     );
     throw new OverpassProviderError(
-      "Provider returned no response body.",
-      "invalid_response",
-      response.status,
+      "Provider response exceeded the 3 MB safety limit. Narrow your search.",
+      "provider_invalid_response",
+      status,
     );
   }
-  let body = "";
-  let length = 0;
-  const decoder = new TextDecoder();
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      length += value.byteLength;
-      if (length > 3_000_000) {
-        safeProviderLog(
-          options,
-          url,
-          requestId,
-          started,
-          response.status,
-          "response_too_large",
-        );
-        throw new OverpassProviderError(
-          "Provider response exceeded the 3 MB safety limit. Narrow your search.",
-          "response_too_large",
-          response.status,
-        );
-      }
-      body += decoder.decode(value, { stream: true });
-    }
-  } catch (cause) {
-    if (cause instanceof OverpassProviderError) throw cause;
-    const category = timeout.aborted ? "timeout" : "network_error";
+  if (!bounded.body.trim()) {
     safeProviderLog(
       options,
       url,
+      method,
       requestId,
       started,
-      response.status,
-      category,
+      status,
+      "provider_empty_response",
+      {
+        contentType: bounded.contentType,
+        bodyLength: bounded.length,
+        excerpt: bounded.excerpt,
+        includeBodyExcerpt: true,
+      },
     );
     throw new OverpassProviderError(
-      category === "timeout"
-        ? "OpenStreetMap provider response timed out. No search result was created."
-        : "OpenStreetMap provider response could not be read. No search result was created.",
-      category,
-      response.status,
+      "OpenStreetMap provider returned an empty response. No search result was created.",
+      "provider_empty_response",
+      status,
     );
-  } finally {
-    await reader.cancel();
   }
 
   let parsed: ReturnType<typeof parseProviderPayload>;
   try {
-    parsed = parseProviderPayload(JSON.parse(body));
-  } catch (cause) {
-    const category =
-      cause instanceof SyntaxError ? "invalid_json" : "invalid_response";
+    parsed = parseProviderPayload(JSON.parse(bounded.body));
+  } catch {
     safeProviderLog(
       options,
       url,
+      method,
       requestId,
       started,
-      response.status,
-      category,
+      status,
+      "provider_invalid_response",
+      {
+        contentType: bounded.contentType,
+        bodyLength: bounded.length,
+        excerpt: bounded.excerpt,
+        includeBodyExcerpt: true,
+      },
     );
     throw new OverpassProviderError(
-      category === "invalid_json"
-        ? "OpenStreetMap provider returned invalid JSON. No search result was created."
-        : "OpenStreetMap provider returned an invalid response. No search result was created.",
-      category,
-      response.status,
+      "OpenStreetMap provider returned invalid JSON or an invalid response. No search result was created.",
+      "provider_invalid_response",
+      status,
     );
   }
   if (parsed.remark) {
     safeProviderLog(
       options,
       url,
+      method,
       requestId,
       started,
-      response.status,
-      "incomplete_response",
+      status,
+      "provider_invalid_response",
+      {
+        contentType: bounded.contentType,
+        bodyLength: bounded.length,
+        excerpt: bounded.excerpt,
+        includeBodyExcerpt: true,
+      },
     );
     throw new OverpassProviderError(
       `Provider returned an incomplete response: ${parsed.remark.slice(0, 300)}`,
-      "incomplete_response",
-      response.status,
+      "provider_invalid_response",
+      status,
     );
   }
   const rows: DiscoveredBusiness[] = [];
@@ -468,13 +441,20 @@ export async function discoverOpenStreetMap(
   safeProviderLog(
     options,
     url,
+    method,
     requestId,
     started,
-    response.status,
+    status,
     rows.length ? "success" : "empty_result",
+    {
+      contentType: bounded.contentType,
+      bodyLength: bounded.length,
+      includeBodyExcerpt: false,
+    },
   );
   return rows;
 }
+
 function websiteOrNull(value: string | null) {
   let website = (value || "").slice(0, 300) || null;
   if (website && !/^https?:\/\//i.test(website)) website = `https://${website}`;

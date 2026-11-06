@@ -168,8 +168,14 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
     if (!snapshot && endpoint) {
       try {
         url = new URL(endpoint);
-        if (url.protocol !== "https:" || url.username || url.password)
-          throw new Error("HTTPS required");
+        if (
+          url.protocol !== "https:" ||
+          url.username ||
+          url.password ||
+          url.search ||
+          url.hash
+        )
+          throw new Error("Credential-free HTTPS URL without query/fragment required");
       } catch {
         return reply({ error: "Invalid configured provider URL" }, 503);
       }

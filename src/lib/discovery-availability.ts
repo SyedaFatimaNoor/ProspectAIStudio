@@ -217,9 +217,17 @@ export function discoveryAvailability(
       details,
     );
 
+  const blockedCategories = new Set([
+    "provider_blocked",
+    "provider_bad_request",
+    "provider_not_acceptable",
+    "provider_policy_blocked",
+  ]);
   const providerBlocked =
     worker?.lifecycle_state === "blocked" ||
-    worker?.last_error_category === "provider_blocked" ||
+    (worker?.last_error_category !== null &&
+      worker?.last_error_category !== undefined &&
+      blockedCategories.has(worker.last_error_category)) ||
     check?.status === "blocked" ||
     (status !== null && permanentProviderStatuses.has(status));
   if (providerBlocked)
@@ -311,7 +319,12 @@ export function discoveryJobOutcome(job: Job): DiscoveryJobOutcome | null {
     };
   if (
     job.status === "blocked" ||
-    category === "provider_blocked" ||
+    [
+      "provider_blocked",
+      "provider_bad_request",
+      "provider_not_acceptable",
+      "provider_policy_blocked",
+    ].includes(category) ||
     status === 406
   )
     return {
@@ -319,7 +332,7 @@ export function discoveryJobOutcome(job: Job): DiscoveryJobOutcome | null {
       tone: "error",
       detail:
         status === 406
-          ? "Blocked after a provider or policy error. A prior provider attempt failed: The endpoint rejected this request. No automatic retry will run, including for HTTP 406; operator review is required before any explicit retry."
+          ? "Blocked after a provider or policy error. Review the safe request diagnostic to identify whether this is content negotiation or a provider policy block. No automatic retry will run, including for HTTP 406; operator review is required before any explicit retry."
           : "The provider rejected this work. No automatic retry will run until the source setup is reviewed.",
     };
   if (category === "timeout" || /\btimeout|timed out\b/i.test(job.error || ""))

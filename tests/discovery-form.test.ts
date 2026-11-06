@@ -82,7 +82,7 @@ test("a historical HTTP 406 is accurately labelled as a provider rejection", () 
     discoveryJobErrorMessage(
       "OpenStreetMap provider returned HTTP 406. Respect endpoint rate limits and retry later.",
     ),
-    /endpoint rejected this request/,
+    /safe request diagnostic/,
   );
   assert.doesNotMatch(
     discoveryJobErrorMessage(
