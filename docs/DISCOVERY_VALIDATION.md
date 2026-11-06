@@ -156,12 +156,22 @@ terms and official Overpass command-line/developer guidance:
 
 Operator health probe (`checkProviderHealth("discovery")`):
 
-- Small zero-area query uses `GET` with a correctly encoded `data` query
-  parameter: `[out:json][timeout:8];node(0,0,0,0);out 1;`.
+- Very small, harmless zero-area query uses `GET` with a correctly encoded
+  `data` query parameter and a result limit of one:
+  `[out:json][timeout:5];node(0,0,0,0);out 1;`.
 - No request body or `Content-Type`; same identifying User-Agent/Referer and no
-  explicit `Accept`. Timeout `AbortSignal.timeout(12_000)`. It emits the same
-  safe diagnostic and parses JSON only after status/body checks. It never
-  queues a job or creates a lead.
+  explicit `Accept`. Strict client timeout `AbortSignal.timeout(8_000)`. It
+  emits the same safe diagnostic and parses JSON only after status/body checks.
+- One persisted observation records provider configured state, hostname,
+  request time, response time, HTTP status, response validity, last successful
+  check, last failed check, last error, and recommended action. The server
+  action persists a `checking` state first and is rate limited to one check per
+  30 seconds. It never queues a job, creates a lead, modifies the OSM snapshot,
+  or enables a worker.
+- Operator-facing states: `not_configured`, `checking`, `reachable`, `blocked`,
+  `rate_limited`, `timeout`, `invalid_response`, `unavailable`. HTTP 406 is
+  `blocked / not acceptable`, keeps the worker paused, and is never retried
+  automatically.
 
 ## 9. HTTP 406 diagnosis policy
 

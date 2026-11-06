@@ -24,7 +24,7 @@ export const overpassUserAgent =
 export const overpassReferer =
   "https://prospectaistudio.vercel.app/responsible-use";
 export const overpassDiscoveryTimeoutMs = 30_000;
-export const overpassHealthTimeoutMs = 12_000;
+export const overpassHealthTimeoutMs = 8_000;
 export const overpassQueryTimeoutSeconds = 25;
 export const overpassResponseLimitBytes = 3_000_000;
 export const overpassDiagnosticExcerptLimit = 500;

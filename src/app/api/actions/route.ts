@@ -100,12 +100,12 @@ export async function POST(req: NextRequest) {
           : z.string().trim().max(40).parse(input.provider);
       const healthRate = takeRateLimit(
         `provider-health:${user_id}:${checkedProvider}`,
-        { limit: 3, windowMs: 5 * 60_000 },
+        { limit: 1, windowMs: 30_000 },
       );
       if (!healthRate.allowed)
         return NextResponse.json(
           {
-            error: `Provider health checks for ${checkedProvider} are limited to 3 per 5 minutes. Please wait before retrying.`,
+            error: `Provider health checks for ${checkedProvider} are limited to one per 30 seconds. Please wait before retrying.`,
           },
           { status: 429, headers: rateLimitHeaders(healthRate) },
         );
@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
     async function saveProviderHealth(health: ProviderHealth) {
       const { data: prior, error: priorError } = await db!
         .from("pa_provider_health")
-        .select("last_success_at")
+        .select("last_success_at,last_failed_at")
         .eq("user_id", user_id)
         .eq("provider", health.provider)
         .maybeSingle();
@@ -176,6 +176,8 @@ export async function POST(req: NextRequest) {
             ...health,
             last_success_at:
               health.last_success_at || prior?.last_success_at || null,
+            last_failed_at:
+              health.last_failed_at || prior?.last_failed_at || null,
           },
           { onConflict: "user_id,provider" },
         )
@@ -532,12 +534,32 @@ export async function POST(req: NextRequest) {
       }
       case "test_provider": {
         const provider = z.enum(healthProviderSchema).parse(input.provider);
+        const requestedAt = new Date().toISOString();
+        await saveProviderHealth({
+          provider,
+          status: "checking",
+          checked_at: requestedAt,
+          requested_at: requestedAt,
+          last_success_at: null,
+          last_failed_at: null,
+          latency_ms: null,
+          response_time_ms: null,
+          last_error: null,
+          recommended_action:
+            "A bounded provider check is in progress. Repeated checks are rate limited; no discovery job or lead is created.",
+          provider_configured: discoverySourceConfigured(),
+          provider_hostname: null,
+          http_status: null,
+          response_valid: null,
+        });
         const health = await checkProviderHealth(provider, db);
         const saved = await saveProviderHealth(health);
         await audit(null, {
           provider,
           status: saved.status,
           latency_ms: saved.latency_ms,
+          http_status: saved.http_status,
+          response_valid: saved.response_valid,
         });
         result = saved;
         break;
@@ -546,15 +568,23 @@ export async function POST(req: NextRequest) {
         const started = Date.now();
         try {
           const health = await new CompatibleAI().healthCheck();
+          const checkedAt = new Date().toISOString();
           const saved = await saveProviderHealth({
             provider: "ai",
             status: "reachable",
-            checked_at: new Date().toISOString(),
-            last_success_at: new Date().toISOString(),
+            checked_at: checkedAt,
+            requested_at: new Date(started).toISOString(),
+            last_success_at: checkedAt,
+            last_failed_at: null,
             latency_ms: health.latencyMs,
+            response_time_ms: health.latencyMs,
             last_error: null,
             recommended_action:
               "AI is reachable. Review generated drafts before using or exporting them.",
+            provider_configured: true,
+            provider_hostname: null,
+            http_status: 200,
+            response_valid: true,
           });
           // Keep the model response out of the audit log and provider-health
           // row. It is shown only to the requesting signed-in operator and is
@@ -573,18 +603,27 @@ export async function POST(req: NextRequest) {
               : "AI provider health check failed.";
           const status = /rate limit|\(429\)/i.test(message)
             ? "rate_limited"
-            : "unreachable";
+            : "unavailable";
+          const checkedAt = new Date().toISOString();
+          const latency = Date.now() - started;
           await saveProviderHealth({
             provider: "ai",
             status,
-            checked_at: new Date().toISOString(),
+            checked_at: checkedAt,
+            requested_at: new Date(started).toISOString(),
             last_success_at: null,
-            latency_ms: Date.now() - started,
+            last_failed_at: checkedAt,
+            latency_ms: latency,
+            response_time_ms: latency,
             last_error: message.slice(0, 500),
             recommended_action:
               status === "rate_limited"
                 ? "Wait for the provider's stated retry window before testing again."
                 : "Check the server-only provider key, model, endpoint, and provider status.",
+            provider_configured: true,
+            provider_hostname: null,
+            http_status: status === "rate_limited" ? 429 : null,
+            response_valid: false,
           });
           await audit(null, { provider: "ai", status });
           throw cause;

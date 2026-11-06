@@ -189,15 +189,35 @@ function healthTone(
   status: ProviderHealthRecord["status"],
 ): IntegrationState["tone"] {
   if (status === "reachable") return "green";
-  if (status === "rate_limited" || status === "paused" || status === "blocked")
+  if (
+    status === "rate_limited" ||
+    status === "blocked" ||
+    status === "timeout" ||
+    status === "checking" ||
+    status === "paused"
+  )
     return "amber";
-  if (status === "not_configured" || status === "not_applicable")
+  if (
+    status === "not_configured" ||
+    status === "not_applicable" ||
+    status === "unavailable"
+  )
     return "neutral";
   return "red";
 }
 
 function healthStatusLabel(status: ProviderHealthRecord["status"]) {
-  return status.replaceAll("_", " ");
+  const labels: Record<string, string> = {
+    not_configured: "not configured",
+    checking: "checking",
+    reachable: "reachable",
+    blocked: "blocked / not acceptable",
+    rate_limited: "rate limited",
+    timeout: "timeout",
+    invalid_response: "invalid response",
+    unavailable: "unavailable",
+  };
+  return labels[status] || status.replaceAll("_", " ");
 }
 
 function integrationState(
@@ -205,7 +225,16 @@ function integrationState(
   data: Workspace,
   loading: boolean,
   connectionError: string | null,
+  checkingProvider: string | null = null,
 ): IntegrationState {
+  if (checkingProvider === key)
+    return {
+      label: "Checking provider",
+      tone: "amber",
+      configured: true,
+      configuration: "Bounded provider check in progress",
+      reachability: "Checking — one request, rate limited",
+    };
   if (key === "email" || key === "whatsapp")
     return {
       label: "Draft only",
@@ -481,6 +510,7 @@ export default function Settings() {
                 data,
                 loading,
                 connectionError,
+                checkingProvider,
               );
               const providerHealth = data.provider_health.find(
                 (health) => health.provider === i.key,
@@ -694,17 +724,66 @@ export default function Settings() {
                     {providerHealth && (
                       <>
                         <div>
+                          <dt>Provider configured</dt>
+                          <dd>
+                            {providerHealth.provider_configured === false
+                              ? "Not configured"
+                              : status.configured
+                                ? "Configured"
+                                : "Not configured"}
+                          </dd>
+                        </div>
+                        <div>
                           <dt>Last provider check</dt>
                           <dd>
                             {new Date(
-                              providerHealth.checked_at,
+                              providerHealth.requested_at ||
+                                providerHealth.checked_at,
                             ).toLocaleString()}
                           </dd>
                         </div>
                         <div>
                           <dt>Health result</dt>
-                          <dd>{healthStatusLabel(providerHealth.status)}</dd>
+                          <dd>
+                            {checkingProvider === i.key
+                              ? "checking"
+                              : healthStatusLabel(providerHealth.status)}
+                          </dd>
                         </div>
+                        <div>
+                          <dt>HTTP status</dt>
+                          <dd>
+                            {typeof providerHealth.http_status === "number"
+                              ? `HTTP ${providerHealth.http_status}`
+                              : "No HTTP status recorded"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Response time</dt>
+                          <dd>
+                            {typeof (providerHealth.response_time_ms ??
+                              providerHealth.latency_ms) === "number"
+                              ? `${providerHealth.response_time_ms ?? providerHealth.latency_ms} ms`
+                              : "No response time recorded"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Response valid</dt>
+                          <dd>
+                            {providerHealth.response_valid === null ||
+                            providerHealth.response_valid === undefined
+                              ? "Not tested"
+                              : providerHealth.response_valid
+                                ? "Yes"
+                                : "No"}
+                          </dd>
+                        </div>
+                        {providerHealth.provider_hostname && (
+                          <div>
+                            <dt>Provider hostname</dt>
+                            <dd>{providerHealth.provider_hostname}</dd>
+                          </div>
+                        )}
                         {providerHealth.last_success_at && (
                           <div>
                             <dt>Last successful check</dt>
@@ -715,22 +794,26 @@ export default function Settings() {
                             </dd>
                           </div>
                         )}
-                        {providerHealth.latency_ms !== null && (
+                        {providerHealth.last_failed_at && (
                           <div>
-                            <dt>Response time</dt>
-                            <dd>{providerHealth.latency_ms} ms</dd>
-                          </div>
-                        )}
-                        {providerHealth.last_error && (
-                          <div>
-                            <dt>Last health error</dt>
+                            <dt>Last failed check</dt>
                             <dd>
-                              {safeOperationalMessage(
-                                providerHealth.last_error,
-                              )}
+                              {new Date(
+                                providerHealth.last_failed_at,
+                              ).toLocaleString()}
                             </dd>
                           </div>
                         )}
+                        <div>
+                          <dt>Last error</dt>
+                          <dd>
+                            {providerHealth.last_error
+                              ? safeOperationalMessage(
+                                  providerHealth.last_error,
+                                )
+                              : "No last error recorded"}
+                          </dd>
+                        </div>
                         <div>
                           <dt>Recommended action</dt>
                           <dd>
