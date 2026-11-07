@@ -5,6 +5,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
 } from "react";
 import { emptyWorkspace, type Workspace } from "@/lib/types";
 import { CheckCircle2, AlertCircle, X } from "lucide-react";
@@ -27,6 +28,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState(emptyWorkspace);
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const initialLoad = useRef(true);
   const [toast, setToast] = useState<{
     message: string;
     error: boolean;
@@ -35,6 +37,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     setToast({ message, error });
   }, []);
   const refresh = useCallback(async () => {
+    const startedAt = Date.now();
     try {
       const res = await fetch("/api/workspace");
       const result = await res.json();
@@ -55,6 +58,15 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       notify(message, true);
       return false;
     } finally {
+      // Keep the first-run skeleton visible briefly so an immediate response
+      // does not remove loading/error feedback before it can be painted.
+      // Background refreshes remain immediate after the first request.
+      if (initialLoad.current) {
+        const remaining = 120 - (Date.now() - startedAt);
+        if (remaining > 0)
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        initialLoad.current = false;
+      }
       setLoading(false);
     }
   }, [notify]);
