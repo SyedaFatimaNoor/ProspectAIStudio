@@ -12,7 +12,7 @@ const Context = createContext<{
   data: Workspace;
   loading: boolean;
   connectionError: string | null;
-  refresh: () => Promise<boolean>;
+  refresh: (page?: number) => Promise<boolean>;
   action: (type: string, payload: Record<string, unknown>) => Promise<unknown>;
   notify: (message: string, error?: boolean) => void;
 }>({
@@ -34,9 +34,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const notify = useCallback((message: string, error = false) => {
     setToast({ message, error });
   }, []);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (page?: number) => {
     try {
-      const res = await fetch("/api/workspace");
+      const query = page && page > 1 ? `?page=${Math.min(page, 1000)}` : "";
+      const res = await fetch(`/api/workspace${query}`);
       const result = await res.json();
       if (!res.ok || result.error)
         throw new Error(
@@ -88,7 +89,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       const result = await res.json();
       if (!res.ok)
         throw new Error(result.error || "The action could not be completed.");
-      await refresh();
+      await refresh(data.page);
       return result;
     } catch (e) {
       notify(e instanceof Error ? e.message : "Something went wrong.", true);
@@ -103,6 +104,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       {toast && (
         <div
           role="status"
+          aria-live={toast.error ? "assertive" : "polite"}
           className={`toast ${toast.error ? "toast-error" : ""}`}
         >
           {toast.error ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />}

@@ -20,6 +20,7 @@ import {
   Notice,
 } from "@/components/shared";
 import { Button } from "@/components/ui/button";
+import { Tabs } from "@/components/ui/tabs";
 import { LeadDetail } from "@/components/lead-detail";
 import { useWorkspace } from "@/components/workspace-provider";
 export default function Verification() {
@@ -135,22 +136,18 @@ export default function Verification() {
           title="Evidence review queue"
           description="Review every conclusion alongside its supporting sources."
         >
-          <div className="tabs padded-tabs">
-            {[
-              ["review", "Needs review"],
-              ["verified", "Verified active"],
-              ["website", "Website found"],
-              ["all", "All businesses"],
-            ].map(([v, l]) => (
-              <button
-                key={v}
-                onClick={() => setTab(v)}
-                className={tab === v ? "active" : ""}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            className="tabs padded-tabs"
+            label="Evidence review filters"
+            value={tab}
+            onChange={setTab}
+            items={[
+              { value: "review", label: "Needs review" },
+              { value: "verified", label: "Verified active" },
+              { value: "website", label: "Website found" },
+              { value: "all", label: "All businesses" },
+            ]}
+          />
           {!leads.length ? (
             <EmptyState
               icon={FileSearch}

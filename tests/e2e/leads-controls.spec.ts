@@ -111,7 +111,7 @@ test("all Leads Explorer controls operate on source-backed discovery test leads"
   await expect(
     dialog.getByRole("link", { name: /test-discovery/ }),
   ).toHaveAttribute("href", /example\.invalid\/source\/11/);
-  await dialog.getByRole("button", { name: "Notes" }).click();
+  await dialog.getByRole("tab", { name: "Notes" }).click();
   await dialog.getByLabel("Research notes").fill("Saved test review note.");
   await dialog.getByRole("button", { name: "Save notes" }).click();
   await expect(page.getByRole("status")).toContainText("Research notes saved");

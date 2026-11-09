@@ -11,6 +11,7 @@ export type DiscoveryAvailabilityCode =
   | "provider_timeout"
   | "worker_paused"
   | "worker_unavailable"
+  | "worker_stalled"
   | "available";
 
 export type DiscoveryAvailability = {
@@ -107,6 +108,35 @@ function lastWorkerActivity(data: Workspace) {
     worker?.last_started_at ||
     null
   );
+}
+
+function workerStall(data: Workspace, now = Date.now()) {
+  const worker = data.config.worker;
+  if (!worker || data.config.self_hosted_worker || worker.enabled === false)
+    return null;
+  const intervalMs = Math.max(1, worker.interval_minutes || 5) * 60_000;
+  const staleAfter = intervalMs * 3;
+  const heartbeat = worker.last_heartbeat_at
+    ? new Date(worker.last_heartbeat_at).getTime()
+    : null;
+  const oldestQueued = data.jobs
+    .filter((job) => job.status === "queued" || job.status === "running")
+    .map((job) => new Date(job.created_at).getTime())
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b)[0];
+  const heartbeatStale =
+    heartbeat !== null &&
+    Number.isFinite(heartbeat) &&
+    now - heartbeat > staleAfter;
+  const queueStale =
+    oldestQueued !== undefined && now - oldestQueued > staleAfter;
+  if (!heartbeatStale && !queueStale) return null;
+  return {
+    heartbeatStale,
+    queueStale,
+    staleAfter,
+    oldestQueued: oldestQueued ?? null,
+  };
 }
 
 function responseTime(data: Workspace, health: ProviderHealthRecord | null) {
@@ -252,6 +282,16 @@ export function discoveryAvailability(
       "worker_paused",
       "Worker paused — discovery unavailable. Discovery is temporarily unavailable because the source worker is paused. Queued work would not be processed.",
       "Ask the operator to resolve the source/setup issue before resuming the worker.",
+      "operator",
+      details,
+    );
+
+  const stall = workerStall(data);
+  if (stall)
+    return unavailable(
+      "worker_stalled",
+      "Discovery scheduler appears stalled. A queued job has waited longer than three scheduler intervals, or the worker heartbeat is stale. No new job should be queued as if the worker were healthy.",
+      "Ask the operator to verify the Vault token, cron schedule, Edge Function deployment, worker heartbeat, and protected scheduler logs. Keep the worker paused until one bounded real job succeeds.",
       "operator",
       details,
     );

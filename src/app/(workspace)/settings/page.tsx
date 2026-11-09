@@ -31,6 +31,7 @@ import {
 } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Tabs } from "@/components/ui/tabs";
 import { browserSupabase } from "@/lib/browser-supabase";
 import { workerIsKnownPaused } from "@/lib/cloud-worker";
 import {
@@ -182,7 +183,11 @@ function snapshotState(data: Workspace) {
   const dataset = snapshot.dataset_timestamp
     ? ` · dataset ${snapshotDate(snapshot.dataset_timestamp)}`
     : " · dataset timestamp unavailable";
-  return `${businesses.toLocaleString()} imported business records · ${places.toLocaleString()} places · last successful import ${snapshotDate(snapshot.last_successful_import_at)}${dataset}${source}`;
+  const coverage =
+    places <= 1 || businesses < 100
+      ? " · validation-scale extract, not market-wide coverage"
+      : "";
+  return `${businesses.toLocaleString()} imported business records · ${places.toLocaleString()} places · last successful import ${snapshotDate(snapshot.last_successful_import_at)}${dataset}${source}${coverage}`;
 }
 
 function healthTone(
@@ -380,6 +385,8 @@ export default function Settings() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [checkingAi, setCheckingAi] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string | null>(null);
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purging, setPurging] = useState(false);
   const [aiHealth, setAiHealth] = useState<AIHealth | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
@@ -473,21 +480,17 @@ export default function Settings() {
           {statusMessage}
         </p>
       )}
-      <div className="settings-tabs tabs">
-        {[
-          ["integrations", "Integrations"],
-          ["preferences", "Workspace preferences"],
-          ["profile", "Profile & security"],
-        ].map(([v, l]) => (
-          <button
-            key={v}
-            className={tab === v ? "active" : ""}
-            onClick={() => setTab(v)}
-          >
-            {l}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="settings-tabs tabs"
+        label="Settings sections"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "integrations", label: "Integrations" },
+          { value: "preferences", label: "Workspace preferences" },
+          { value: "profile", label: "Profile & security" },
+        ]}
+      />
       {tab === "integrations" && (
         <>
           <div className="settings-intro">
@@ -720,6 +723,16 @@ export default function Settings() {
                           </dd>
                         </div>
                       </>
+                    )}
+                    {data.config.provider_health_error && (
+                      <div>
+                        <dt>Health history warning</dt>
+                        <dd>
+                          {safeOperationalMessage(
+                            data.config.provider_health_error,
+                          )}
+                        </dd>
+                      </div>
                     )}
                     {providerHealth && (
                       <>
@@ -1029,16 +1042,8 @@ export default function Settings() {
               </Notice>
               <Button
                 variant="outline"
-                onClick={async () => {
-                  try {
-                    const r = (await action("purge_expired", {})) as {
-                      deleted: number;
-                    };
-                    notify(
-                      `Cleanup completed. ${r.deleted || 0} expired leads removed.`,
-                    );
-                  } catch {}
-                }}
+                disabled={purging}
+                onClick={() => setPurgeOpen(true)}
               >
                 <Trash2 size={15} />
                 Delete expired leads
@@ -1048,6 +1053,52 @@ export default function Settings() {
               </p>
             </div>
           </Panel>
+          <Dialog
+            open={purgeOpen}
+            onOpenChange={(open) => !purging && setPurgeOpen(open)}
+            title="Delete expired leads?"
+          >
+            <p>
+              This permanently deletes leads older than your saved retention
+              period, together with their sources, evidence, proposals, drafts,
+              and related message events. Suppression records are retained to
+              honour opt-outs.
+            </p>
+            <p className="field-help">
+              Retention period: {form.retention_days} days. The server reports
+              the exact affected-row count after cleanup.
+            </p>
+            <div className="dialog-actions">
+              <Button
+                variant="outline"
+                disabled={purging}
+                onClick={() => setPurgeOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={purging}
+                onClick={async () => {
+                  setPurging(true);
+                  try {
+                    const r = (await action("purge_expired", {})) as {
+                      deleted: number;
+                    };
+                    notify(
+                      `Cleanup completed. ${r.deleted || 0} expired leads removed.`,
+                    );
+                    setPurgeOpen(false);
+                  } catch {
+                  } finally {
+                    setPurging(false);
+                  }
+                }}
+              >
+                {purging ? <Spinner /> : <Trash2 size={15} />}
+                {purging ? "Deleting…" : "Confirm deletion"}
+              </Button>
+            </div>
+          </Dialog>
         </div>
       )}
       {tab === "profile" && (

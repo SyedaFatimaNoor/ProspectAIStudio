@@ -8,17 +8,29 @@
  * override both values together through NEXT_PUBLIC_* environment variables.
  */
 const projectUrl = "https://vfplvwtububtaovyalgu.supabase.co";
-const projectPublishableKey = "sb_publishable_4_7mo5M2l9vxJCRuf8hzeA_fYPijLZA";
+const projectPublishableKey =
+  "sb_publishable_4_7mo5M2l9vxJCRuf8hzeA_fYPijLZA";
+const allowPublicDefaults =
+  process.env.NEXT_PUBLIC_ALLOW_PUBLIC_DEFAULTS === "1";
 
 const overrideUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 const overrideKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
-const hasOverride = Boolean(overrideUrl || overrideKey);
+const hasOverride = Boolean(overrideUrl && overrideKey);
+const partialOverride = Boolean(overrideUrl || overrideKey);
 
-// Never combine a custom project's URL with this project's publishable key.
-export const supabaseUrl = hasOverride ? overrideUrl || "" : projectUrl;
+// Fail closed on a partial override and require an explicit opt-in for the
+// source defaults. Deployments must provide both public values together or
+// deliberately enable the documented preview fallback.
+export const supabaseUrl = hasOverride
+  ? overrideUrl || ""
+  : partialOverride || !allowPublicDefaults
+    ? ""
+    : projectUrl;
 export const supabasePublishableKey = hasOverride
   ? overrideKey || ""
-  : projectPublishableKey;
+  : partialOverride || !allowPublicDefaults
+    ? ""
+    : projectPublishableKey;
 export const supabaseConfigured = Boolean(
   supabaseUrl && supabasePublishableKey,
 );

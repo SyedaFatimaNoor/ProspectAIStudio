@@ -14,15 +14,14 @@ import {
   rateLimitHeaders,
   takeRateLimit,
 } from "@/lib/rate-limit";
+import { takeSharedRateLimit } from "@/lib/shared-rate-limit";
 export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
-  const rate = takeRateLimit(
-    clientRateLimitKey(req.headers, "workspace-read"),
-    {
-      limit: 60,
-      windowMs: 60_000,
-    },
-  );
+  const readKey = clientRateLimitKey(req.headers, "workspace-read");
+  const readWindow = { limit: 60, windowMs: 60_000 };
+  const rate =
+    (await takeSharedRateLimit(readKey, readWindow)) ??
+    takeRateLimit(readKey, readWindow);
   if (!rate.allowed)
     return NextResponse.json(
       {
@@ -91,14 +90,22 @@ export async function GET(req: NextRequest) {
       events: "outreach_events",
       settings: "integration_settings",
     };
+    const page = Math.min(
+      Math.max(Number(req.nextUrl.searchParams.get("page")) || 1, 1),
+      1000,
+    );
+    const pageSize = 1000;
     const results = await Promise.all(
       Object.entries(tables).map(async ([key, table]) => {
-        const { data, error, count } = await db
+        const query = db
           .from(`pa_${table}`)
           .select("*", { count: "exact" })
           .eq("user_id", user.id)
-          .order("created_at", { ascending: false })
-          .limit(1000);
+          .order("created_at", { ascending: false });
+        const { data, error, count } =
+          key === "businesses"
+            ? await query.range((page - 1) * pageSize, page * pageSize - 1)
+            : await query.limit(pageSize);
         if (error) throw new Error(`Unable to load ${key}: ${error.message}`);
         return [
           key,
@@ -116,6 +123,10 @@ export async function GET(req: NextRequest) {
       )
       .eq("user_id", user.id)
       .order("checked_at", { ascending: false });
+    if (providerHealthError) {
+      config.provider_health_error =
+        "Saved provider health history could not be loaded. Ask the operator to apply the provider-health migration and verify tenant-scoped access.";
+    }
     const payload = Object.fromEntries(results) as Record<string, unknown>;
     const loadedBusinesses = (payload.businesses || []) as { id: string }[];
     const { data: sourceRows, error: sourceError } = loadedBusinesses.length
@@ -156,14 +167,19 @@ export async function GET(req: NextRequest) {
         ...payload,
         businesses,
         windowed: results.some((r) => Boolean(r[2])),
+        page,
+        page_size: pageSize,
+        has_more:
+          ((payload.businesses as unknown[]) || []).length === pageSize &&
+          Boolean(results.find((r) => r[0] === "businesses")?.[2]),
         user: {
           id: user.id,
           email: user.email,
           display_name: profile?.display_name || "",
           updated_at: profile?.updated_at || undefined,
         },
-        // An unavailable optional health table intentionally appears as an empty
-        // history rather than a database outage.
+        // Keep the workspace readable on schema drift, but surface a bounded
+        // operator notice instead of silently presenting an empty history.
         provider_health: providerHealthError ? [] : providerHealth || [],
         config,
       },

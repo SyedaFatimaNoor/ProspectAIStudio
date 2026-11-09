@@ -36,6 +36,7 @@ import {
   rateLimitHeaders,
   takeRateLimit,
 } from "@/lib/rate-limit";
+import { takeSharedRateLimit } from "@/lib/shared-rate-limit";
 import { rejectClientTenantOverride } from "@/lib/tenant-security";
 import { outreachEligibility } from "@/lib/outreach";
 export const maxDuration = 90;
@@ -51,13 +52,11 @@ export async function POST(req: NextRequest) {
         { error: "Invalid request origin." },
         { status: 403 },
       );
-    const rate = takeRateLimit(
-      clientRateLimitKey(req.headers, "workspace-action"),
-      {
-        limit: 30,
-        windowMs: 60_000,
-      },
-    );
+    const actionKey = clientRateLimitKey(req.headers, "workspace-action");
+    const actionWindow = { limit: 30, windowMs: 60_000 };
+    const rate =
+      (await takeSharedRateLimit(actionKey, actionWindow)) ??
+      takeRateLimit(actionKey, actionWindow);
     if (!rate.allowed)
       return NextResponse.json(
         { error: "Too many requests. Please wait a moment and try again." },
@@ -98,10 +97,11 @@ export async function POST(req: NextRequest) {
         type === "test_ai"
           ? "ai"
           : z.string().trim().max(40).parse(input.provider);
-      const healthRate = takeRateLimit(
-        `provider-health:${user_id}:${checkedProvider}`,
-        { limit: 1, windowMs: 30_000 },
-      );
+      const healthKey = `provider-health:${user_id}:${checkedProvider}`;
+      const healthWindow = { limit: 1, windowMs: 30_000 };
+      const healthRate =
+        (await takeSharedRateLimit(healthKey, healthWindow)) ??
+        takeRateLimit(healthKey, healthWindow);
       if (!healthRate.allowed)
         return NextResponse.json(
           {
@@ -453,6 +453,22 @@ export async function POST(req: NextRequest) {
             throw new Error(
               "A proposal cannot be reassigned to another business.",
             );
+          // Preserve the exact pre-edit copy before incrementing the version.
+          // Best effort until the revision migration is applied; proposal editing
+          // remains available on older databases.
+          await db.from("pa_proposal_revisions").insert({
+            user_id,
+            proposal_id: p.id,
+            version: p.version,
+            title: p.title,
+            content: p.content,
+            origin: p.origin,
+            ai_provider: p.ai_provider ?? null,
+            ai_model: p.ai_model ?? null,
+            generated_at: p.generated_at ?? null,
+            ai_output: p.ai_output ?? null,
+            facts_snapshot: p.facts_snapshot ?? null,
+          });
           result = await update("proposals", v.id, {
             title: v.title,
             content: v.content,

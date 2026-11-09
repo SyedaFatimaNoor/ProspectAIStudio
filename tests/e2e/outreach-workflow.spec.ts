@@ -222,7 +222,7 @@ test("Outreach Centre completes the full draft workflow without sending", async 
     "Draft approved",
   );
 
-  await page.getByRole("button", { name: "Approved", exact: true }).click();
+  await page.getByRole("tab", { name: "Approved", exact: true }).click();
   await page.locator(".message-list button").first().click();
   dialog = page.getByRole("dialog");
   const download = page.waitForEvent("download");
@@ -235,7 +235,7 @@ test("Outreach Centre completes the full draft workflow without sending", async 
 
   await page.keyboard.press("Escape");
   await page
-    .getByRole("button", { name: "Suppression list", exact: true })
+    .getByRole("tab", { name: "Suppression list", exact: true })
     .click();
   await page.getByLabel("Contact to suppress").fill(publicOutreachPhone);
   await page

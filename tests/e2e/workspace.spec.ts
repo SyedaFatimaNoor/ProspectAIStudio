@@ -441,7 +441,7 @@ test("lead detail shows independent confidence, evidence provenance, notes and k
       exact: false,
     }),
   ).toBeVisible();
-  await dialog.getByRole("button", { name: "Notes", exact: true }).click();
+  await dialog.getByRole("tab", { name: "Notes", exact: true }).click();
   await dialog.getByLabel("Research notes").fill("Test-only research notes.");
   await dialog.getByRole("button", { name: "Save notes" }).click();
   await expect(page.getByRole("status")).toContainText("Research notes saved");
@@ -563,7 +563,7 @@ test("opt-out records appear on suppression list", async ({ page }) => {
   const state = await mocked(page);
   await page.goto("/outreach");
   await page
-    .getByRole("button", { name: "Suppression list", exact: true })
+    .getByRole("tab", { name: "Suppression list", exact: true })
     .click();
   await page.getByLabel("Contact to suppress").fill(publicOutreachPhone);
   await page

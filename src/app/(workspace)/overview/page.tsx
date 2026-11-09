@@ -82,11 +82,12 @@ export default function Overview() {
       link: "/verification",
     },
   ];
+  const chartDays = Math.min(Math.max(Number(period) || 30, 7), 365);
   const days = useMemo(() => {
     if (!clockReady) return [];
-    return Array.from({ length: 14 }, (_, i) => {
+    return Array.from({ length: chartDays }, (_, i) => {
       const date = new Date();
-      date.setDate(date.getDate() - 13 + i);
+      date.setDate(date.getDate() - chartDays + 1 + i);
       return {
         date,
         count: leads.filter(
@@ -94,7 +95,7 @@ export default function Overview() {
         ).length,
       };
     });
-  }, [clockReady, leads]);
+  }, [clockReady, leads, chartDays]);
   const max = Math.max(2, ...days.map((d) => d.count));
   return (
     <>
@@ -122,7 +123,7 @@ export default function Overview() {
           </Link>
         </Button>
       </PageHeading>
-      {!data.user && !connectionError && (
+      {!loading && !data.user && !connectionError && (
         <div className="preview-banner">
           <span>
             <span className="preview-dot" />
@@ -225,7 +226,7 @@ export default function Overview() {
             <strong>{leads.length}</strong>
             <span>businesses in this period</span>
             <span className="muted chart-period">
-              Daily activity · last 14 days
+              Daily activity · last {chartDays} days
             </span>
           </div>
           <div className="activity-chart">
