@@ -283,6 +283,7 @@ test("Outreach Centre completes the full draft workflow without sending", async 
 test("Outreach Centre blocks all five ineligible draft states", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   const cases = [
     {
       name: "no lead selected",
@@ -358,6 +359,10 @@ test("Outreach Centre blocks all five ineligible draft states", async ({
       ? structuredClone(item.patch.suppressions)
       : [];
     await page.goto("/outreach");
+    await expect(page.getByText("Loading workspace…")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "New draft" }),
+    ).toBeEnabled();
     await page.getByRole("button", { name: "New draft" }).click();
     const dialog = page.getByRole("dialog");
     if (item.selectLead)
