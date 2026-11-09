@@ -50,7 +50,10 @@ export default function Leads() {
     const p = new URLSearchParams(window.location.search);
     setDetail(p.get("lead"));
     if (p.get("status")) setStatus(p.get("status")!);
-  }, []);
+    const requestedPage = Number(p.get("page"));
+    if (requestedPage > 1 && requestedPage <= 1000)
+      void refresh(requestedPage);
+  }, [refresh]);
   useEffect(() => setPage(1), [q, status, category, sort]);
   const rows = filterAndSortLeads(data.businesses, {
     query: q,
@@ -195,10 +198,8 @@ export default function Leads() {
               onChange={(e) => setStatus(e.target.value)}
             >
               <option value="all">All statuses</option>
-              <option value="Unverified">Unverified</option>
-              <option value="Manual review required">
-                Manual review required
-              </option>
+              <option value="manual_review">Manual review</option>
+              <option value="candidate_found">Website candidate found</option>
               <option value="website_found">Website found</option>
               <option value="no_website_high_confidence">
                 No website · high confidence

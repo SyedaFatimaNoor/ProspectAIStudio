@@ -27,9 +27,11 @@ import {
   Notice,
   Badge,
   EmptyState,
+  Spinner,
 } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Tabs } from "@/components/ui/tabs";
 import { download, formatDate } from "@/lib/utils";
 import { outreachEligibility, publicContactForChannel } from "@/lib/outreach";
 import type { Business, Message } from "@/lib/types";
@@ -201,6 +203,12 @@ export default function Outreach() {
       setError("Save the draft before exporting so the export can be audited.");
       return;
     }
+    if (savedSnapshot !== snapshot(form)) {
+      setError(
+        "Save your latest edits before exporting. The export must match the audited saved draft.",
+      );
+      return;
+    }
     setBusy(true);
     try {
       await action("export_outreach_draft", { id: form.id });
@@ -220,7 +228,9 @@ export default function Outreach() {
     setBusy(true);
     try {
       await action("suppress", { contact, reason });
-      notify("Opt-out recorded. Existing matching drafts are now suppressed.");
+      notify(
+        "Opt-out recorded. Drafts with this exact recipient are suppressed; formatting variants may still need manual review.",
+      );
       setContact("");
       setReason("");
       setError("");
@@ -322,22 +332,18 @@ export default function Outreach() {
           title="Your conversations start here"
           description="Personalised, reviewed, and never sent automatically."
         >
-          <div className="tabs padded-tabs">
-            {[
-              ["drafts", "Drafts"],
-              ["approved", "Approved"],
-              ["sent", "Sent"],
-              ["suppression", "Suppression list"],
-            ].map(([v, l]) => (
-              <button
-                key={v}
-                className={tab === v ? "active" : ""}
-                onClick={() => setTab(v)}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            className="tabs padded-tabs"
+            label="Outreach sections"
+            value={tab}
+            onChange={setTab}
+            items={[
+              { value: "drafts", label: "Drafts" },
+              { value: "approved", label: "Approved" },
+              { value: "sent", label: "Sent" },
+              { value: "suppression", label: "Suppression list" },
+            ]}
+          />
           {tab === "suppression" ? (
             <div className="panel-body">
               <form className="form-stack" onSubmit={suppress}>
@@ -766,9 +772,10 @@ export default function Outreach() {
                   busy
                 }
                 onClick={() => void save()}
+                aria-busy={busy}
               >
-                <Save size={15} />
-                Save draft
+                {busy ? <Spinner /> : <Save size={15} />}
+                {busy ? "Working…" : "Save draft"}
               </Button>
               <Button
                 disabled={

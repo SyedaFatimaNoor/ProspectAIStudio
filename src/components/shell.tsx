@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Orbit,
   LayoutDashboard,
@@ -46,6 +46,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
   const [help, setHelp] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
   const label =
     nav.find((n) => path.startsWith(n.href))?.label ||
     "Settings & integrations";
@@ -59,6 +60,41 @@ export function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+  useEffect(() => {
+    if (!mobile) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const sidebar = sidebarRef.current;
+    const focusable = () =>
+      Array.from(
+        sidebar?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])',
+        ) || [],
+      ).filter((el) => el.offsetParent !== null);
+    focusable()[0]?.focus();
+    const trap = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMobile(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", trap);
+    return () => {
+      document.removeEventListener("keydown", trap);
+      previous?.focus?.();
+    };
+  }, [mobile]);
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -71,7 +107,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
           onClick={() => setMobile(false)}
         />
       )}
-      <aside className={`sidebar ${mobile ? "sidebar-open" : ""}`}>
+      <aside
+        ref={sidebarRef}
+        className={`sidebar ${mobile ? "sidebar-open" : ""}`}
+        aria-label="Workspace navigation"
+        aria-modal={mobile ? true : undefined}
+        role={mobile ? "dialog" : undefined}
+      >
         <Link href="/" className="brand">
           <span className="brand-symbol">
             <Orbit size={25} />
@@ -207,8 +249,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </Link>
             <button
               className="top-avatar"
-              onClick={() => router.push("/sign-in")}
-              aria-label="Your account"
+              onClick={() =>
+                router.push(data.user ? "/settings" : "/sign-in")
+              }
+              aria-label={data.user ? "Workspace settings" : "Sign in"}
             >
               {data.user?.email?.[0]?.toUpperCase() || "Y"}
             </button>
@@ -218,9 +262,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {data.windowed && (
             <div className="window-notice">
               <Notice>
-                Large workspace: this view shows up to 1,000 recent records per
-                section. Metrics, filters, and exports reflect this loaded
-                window, not all-time totals.
+                Large workspace: page {data.page || 1} shows up to{" "}
+                {data.page_size || 1000} recent records per section. Metrics,
+                filters, and exports reflect this loaded window, not all-time
+                totals.{" "}
+                <Link href={`/leads?page=${(data.page || 1) + 1}`}>
+                  Load older leads
+                </Link>
+                {data.has_more === false ? " · No older leads remain." : ""}
               </Notice>
             </div>
           )}
@@ -248,6 +297,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <Search size={18} />
           <input
             autoFocus
+            aria-label="Search pages and businesses"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search pages and businesses…"

@@ -19,6 +19,7 @@ import {
 import type { Business } from "@/lib/types";
 import { useWorkspace } from "./workspace-provider";
 import { Dialog } from "./ui/dialog";
+import { Tabs } from "./ui/tabs";
 import { Button } from "./ui/button";
 import { Badge, Notice, Spinner, Field } from "./shared";
 import { formatDate } from "@/lib/utils";
@@ -46,6 +47,14 @@ export function LeadDetail({
     setNotes(lead?.notes || "");
     setTab("evidence");
     setConfirmDelete(false);
+    setManual({
+      activity: "verified_active",
+      website: "manual_review",
+      explanation: "",
+      source_url: "",
+      second_source: "",
+      observed_at: new Date().toISOString().slice(0, 10),
+    });
   }, [lead?.id, lead?.notes]);
   if (!lead) return null;
   const runs = data.runs.filter((r) => r.business_id === lead.id);
@@ -136,23 +145,17 @@ export function LeadDetail({
           </small>
         </div>
       </div>
-      <div className="tabs">
-        {["evidence", "contact", "notes", "assessment"].map((t) => (
-          <button
-            key={t}
-            className={tab === t ? "active" : ""}
-            onClick={() => setTab(t)}
-          >
-            {t === "evidence"
-              ? "Evidence & history"
-              : t === "contact"
-                ? "Contact & provenance"
-                : t === "assessment"
-                  ? "Record assessment"
-                  : "Notes"}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        label="Lead detail sections"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "evidence", label: "Evidence & history" },
+          { value: "contact", label: "Contact & provenance" },
+          { value: "notes", label: "Notes" },
+          { value: "assessment", label: "Record assessment" },
+        ]}
+      />
       {tab === "evidence" && (
         <div className="detail-body">
           <Notice>

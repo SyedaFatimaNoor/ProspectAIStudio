@@ -205,6 +205,7 @@ export type Workspace = {
     discovery_error?: string;
     ai: boolean;
     self_hosted_worker?: boolean;
+    provider_health_error?: string;
     snapshot?: {
       businesses: number;
       places: number;
@@ -223,6 +224,9 @@ export type Workspace = {
     worker?: WorkerHealth;
   };
   windowed?: boolean;
+  page?: number;
+  page_size?: number;
+  has_more?: boolean;
   error?: string;
 };
 export const emptyWorkspace: Workspace = {
