@@ -461,7 +461,7 @@ test("settings shows durable worker lifecycle, heartbeat and aggregate job healt
     daily_attempts: 2,
     interval_minutes: 5,
     provider_source: "openstreetmap:overpass-api.de",
-    worker_version: "7.0.0",
+    worker_version: "7.0.3",
     last_heartbeat_at: "2026-11-05T09:00:00.000Z",
     last_started_at: "2026-11-05T08:59:00.000Z",
     last_finished_at: "2026-11-05T09:00:00.000Z",
@@ -490,7 +490,7 @@ test("settings shows durable worker lifecycle, heartbeat and aggregate job healt
   await expect(card).toContainText("paused · blocked");
   await expect(card).toContainText("Last heartbeat");
   await expect(card).toContainText("Worker version");
-  await expect(card).toContainText("7.0.0");
+  await expect(card).toContainText("7.0.3");
   await expect(card).toContainText("openstreetmap:overpass-api.de");
   await expect(card).toContainText("12 source records");
   await expect(card).toContainText("3 duplicates");

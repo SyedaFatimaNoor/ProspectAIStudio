@@ -217,7 +217,7 @@ test("the cloud worker uses the snapshot with no endpoint and no network fetch",
       if (name === "pa_cloud_heartbeat") {
         assert.deepEqual(args, {
           p_source: "openstreetmap:snapshot",
-          p_worker_version: "7.0.0",
+          p_worker_version: "7.0.3",
         });
         return { data: null, error: null };
       }

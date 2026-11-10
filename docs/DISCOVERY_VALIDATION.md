@@ -21,7 +21,7 @@ access tokens, or private user rows were printed or copied into this repository.
 - `supabase/functions/prospectai-worker/bundle.js` — reproducible, self-contained
   deployment artifact.
 - `scripts/worker.ts` — separately started Node worker.
-- `src/lib/worker-lifecycle.ts` — `cloudWorkerVersion = 7.0.0`, failure
+- `src/lib/worker-lifecycle.ts` — `cloudWorkerVersion = 7.0.3`, failure
   classification, bounded detail, source marker.
 - `src/lib/cloud-worker.ts` — paused-worker display contract.
 - `supabase/config.toml` — `[functions.prospectai-worker]` and `verify_jwt = false`.
@@ -29,6 +29,8 @@ access tokens, or private user rows were printed or copied into this repository.
   'prospectai-cloud-worker','*/5 * * * *','select public.pa_cloud_tick()')`.
 - `supabase/migrations/202611050004_worker_lifecycle_and_health.sql` — current cloud
   lifecycle, lease, heartbeat, daily cap, blocked/paused handling.
+- `supabase/migrations/202611100001_discovery_stage_telemetry.sql` — bounded
+  per-RPC timeouts and protected stage telemetry for the 7.0.3 worker.
 
 ## 3. OSM snapshot / import implementation
 

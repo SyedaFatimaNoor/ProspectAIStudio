@@ -9,6 +9,7 @@ begin
    has_function_privilege('authenticated','public.pa_cloud_commit(uuid,uuid,jsonb,integer)','execute') or
    has_function_privilege('authenticated','public.pa_cloud_tick()','execute') or
    has_function_privilege('authenticated','public.pa_cloud_fail(uuid,uuid,text,text,integer,text)','execute') or
+   has_function_privilege('authenticated','public.pa_cloud_fail(uuid,uuid,text,text,integer,text,text)','execute') or
    has_function_privilege('authenticated','public.pa_cloud_pause_source(text)','execute') or
    has_table_privilege('authenticated','public.pa_cloud_worker','update') then
    raise exception 'Privileged cloud controls are exposed';

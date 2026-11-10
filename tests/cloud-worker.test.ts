@@ -148,12 +148,12 @@ test("cloud job and tenant come only from a leased database claim, never request
   assert.equal(calls[0].name, "pa_cloud_heartbeat");
   assert.deepEqual(calls[0].args, {
     p_source: "openstreetmap:overpass-api.de",
-    p_worker_version: "7.0.0",
+    p_worker_version: "7.0.3",
   });
   assert.equal(calls[1].name, "pa_cloud_claim");
   assert.deepEqual(calls[1].args, {
     p_source: "openstreetmap:overpass-api.de",
-    p_worker_version: "7.0.0",
+    p_worker_version: "7.0.3",
   });
   assert.equal(calls[2].name, "pa_cloud_commit");
   assert.deepEqual(calls[2].args?.p_job, job.id);
@@ -173,7 +173,8 @@ test("provider failure records a retry and never fabricates a completed empty se
         if (name === "pa_cloud_fail") {
           assert.match(String(args?.p_error), /HTTP 429/);
           assert.equal(args?.p_error_category, "rate_limited");
-          assert.equal(args?.p_worker_version, "7.0.0");
+          assert.equal(args?.p_worker_version, "7.0.3");
+          assert.equal(args?.p_stage, "overpass_search");
           assert.equal(typeof args?.p_response_time_ms, "number");
         }
         return {
@@ -227,13 +228,15 @@ test("HTTP 406 is recorded as blocked and is never scheduled as an automatic ret
   assert.equal(failures[0].p_error_category, "provider_blocked");
 });
 
-test("commit failure does not report success", async () => {
+test("commit failure records the bounded commit stage and does not report success", async () => {
   const calls: string[] = [];
+  const failures: Record<string, unknown>[] = [];
   const handler = createWorkerHandler({
     env,
     database: () => ({
-      rpc: async (name) => {
+      rpc: async (name, args) => {
         calls.push(name);
+        if (name === "pa_cloud_fail") failures.push(args || {});
         return {
           data: name === "pa_cloud_claim" ? { job, token } : null,
           error:
@@ -252,6 +255,8 @@ test("commit failure does not report success", async () => {
     "pa_cloud_commit",
     "pa_cloud_fail",
   ]);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].p_stage, "commit");
 });
 
 test("portable cloud input parser matches supported Zod job limits and rejects category prototypes", async () => {

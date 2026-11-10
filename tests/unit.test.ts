@@ -177,7 +177,7 @@ test("URL validation blocks non-web protocols, credentials, unusual ports and lo
 });
 test("public IP checks reject private, reserved, mapped and metadata ranges", () => {
   for (const ip of [
-    "127.0.0.1",
+    "127.0.3.1",
     "10.1.2.3",
     "172.17.0.1",
     "192.168.1.1",
@@ -186,7 +186,7 @@ test("public IP checks reject private, reserved, mapped and metadata ranges", ()
     "0.0.0.0",
     "224.1.1.1",
     "::1",
-    "::ffff:127.0.0.1",
+    "::ffff:127.0.3.1",
     "fe80::1",
     "fc00::1",
     "2002:7f00:1::",
