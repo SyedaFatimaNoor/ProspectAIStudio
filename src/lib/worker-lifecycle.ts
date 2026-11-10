@@ -1,7 +1,7 @@
 // Portable worker lifecycle helpers. They contain no credentials, business data,
 // or environment access so the same classification is used by hosted and local
 // workers.
-export const cloudWorkerVersion = "7.0.0";
+export const cloudWorkerVersion = "7.0.3";
 
 export type WorkerFailureCategory =
   | "provider_blocked"

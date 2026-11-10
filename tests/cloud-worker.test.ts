@@ -148,12 +148,12 @@ test("cloud job and tenant come only from a leased database claim, never request
   assert.equal(calls[0].name, "pa_cloud_heartbeat");
   assert.deepEqual(calls[0].args, {
     p_source: "openstreetmap:overpass-api.de",
-    p_worker_version: "7.0.0",
+    p_worker_version: "7.0.3",
   });
   assert.equal(calls[1].name, "pa_cloud_claim");
   assert.deepEqual(calls[1].args, {
     p_source: "openstreetmap:overpass-api.de",
-    p_worker_version: "7.0.0",
+    p_worker_version: "7.0.3",
   });
   assert.equal(calls[2].name, "pa_cloud_commit");
   assert.deepEqual(calls[2].args?.p_job, job.id);
@@ -173,7 +173,7 @@ test("provider failure records a retry and never fabricates a completed empty se
         if (name === "pa_cloud_fail") {
           assert.match(String(args?.p_error), /HTTP 429/);
           assert.equal(args?.p_error_category, "rate_limited");
-          assert.equal(args?.p_worker_version, "7.0.0");
+          assert.equal(args?.p_worker_version, "7.0.3");
           assert.equal(typeof args?.p_response_time_ms, "number");
         }
         return {

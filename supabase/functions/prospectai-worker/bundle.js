@@ -654,7 +654,7 @@ function snapshotReadiness(value) {
 }
 
 // src/lib/worker-lifecycle.ts
-var cloudWorkerVersion = "7.0.0";
+var cloudWorkerVersion = "7.0.3";
 function httpStatus(value) {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
@@ -778,34 +778,52 @@ function databaseClient(env, deadline) {
     throw new Error("Database is not configured");
   return {
     async rpc(name, args = {}) {
-      const response = await fetch(
-        `${base.replace(/\/$/, "")}/rest/v1/rpc/${encodeURIComponent(name)}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: key,
-            Authorization: `Bearer ${key}`
-          },
-          body: JSON.stringify(args),
-          signal: AbortSignal.any([deadline, AbortSignal.timeout(2e4)])
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15e3);
+      const abortForDeadline = () => controller.abort();
+      deadline.addEventListener("abort", abortForDeadline, { once: true });
+      const request = (async () => {
+        const response = await fetch(
+          `${base.replace(/\/$/, "")}/rest/v1/rpc/${encodeURIComponent(name)}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: key,
+              Authorization: `Bearer ${key}`
+            },
+            body: JSON.stringify(args),
+            signal: controller.signal
+          }
+        );
+        const body = await response.text();
+        let data = null;
+        if (body) {
+          try {
+            data = JSON.parse(body);
+          } catch {
+            data = null;
+          }
         }
+        return response.ok ? { data, error: null } : {
+          data: null,
+          error: {
+            message: typeof data === "object" && data && "message" in data ? String(data.message).slice(0, 500) : `Database HTTP ${response.status}`
+          }
+        };
+      })();
+      const forcedTimeout = new Promise(
+        (_, reject) => setTimeout(
+          () => reject(new Error(`Database RPC timed out: ${name}`)),
+          15e3
+        )
       );
-      const body = await response.text();
-      let data = null;
-      if (body) {
-        try {
-          data = JSON.parse(body);
-        } catch {
-          data = null;
-        }
+      try {
+        return await Promise.race([request, forcedTimeout]);
+      } finally {
+        clearTimeout(timeout);
+        deadline.removeEventListener("abort", abortForDeadline);
       }
-      return response.ok ? { data, error: null } : {
-        data: null,
-        error: {
-          message: typeof data === "object" && data && "message" in data ? String(data.message).slice(0, 500) : `Database HTTP ${response.status}`
-        }
-      };
     }
   };
 }
@@ -845,7 +863,7 @@ function createWorkerHandler({ env, database, provider }) {
         return reply({ error: "Invalid configured provider URL" }, 503);
       }
     }
-    const deadline = AbortSignal.timeout(8e4);
+    const deadline = AbortSignal.timeout(7e4);
     let db;
     try {
       db = database ? database() : databaseClient(env, deadline);
