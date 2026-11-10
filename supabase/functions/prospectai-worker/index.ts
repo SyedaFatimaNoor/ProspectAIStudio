@@ -77,42 +77,60 @@ export function databaseClient(
     throw new Error("Database is not configured");
   return {
     async rpc(name, args = {}) {
-      const response = await fetch(
-        `${base.replace(/\/$/, "")}/rest/v1/rpc/${encodeURIComponent(name)}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: key,
-            Authorization: `Bearer ${key}`,
-          },
-          body: JSON.stringify(args),
-          signal: AbortSignal.any([deadline, AbortSignal.timeout(20000)]),
-        },
-      );
-      // PostgreSQL functions returning void commonly produce a 204 with no
-      // response body. Treat that as a successful RPC instead of attempting to
-      // parse an empty body as JSON (which used to make the heartbeat fail).
-      const body = await response.text();
-      let data: unknown = null;
-      if (body) {
-        try {
-          data = JSON.parse(body) as unknown;
-        } catch {
-          data = null;
-        }
-      }
-      return response.ok
-        ? { data, error: null }
-        : {
-            data: null,
-            error: {
-              message:
-                typeof data === "object" && data && "message" in data
-                  ? String(data.message).slice(0, 500)
-                  : `Database HTTP ${response.status}`,
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15_000);
+      const abortForDeadline = () => controller.abort();
+      deadline.addEventListener("abort", abortForDeadline, { once: true });
+      const request = (async () => {
+        const response = await fetch(
+          `${base.replace(/\/$/, "")}/rest/v1/rpc/${encodeURIComponent(name)}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: key,
+              Authorization: `Bearer ${key}`,
             },
-          };
+            body: JSON.stringify(args),
+            signal: controller.signal,
+          },
+        );
+        // PostgreSQL functions returning void commonly produce a 204 with no
+        // response body. Treat that as a successful RPC instead of attempting
+        // to parse an empty body as JSON.
+        const body = await response.text();
+        let data: unknown = null;
+        if (body) {
+          try {
+            data = JSON.parse(body) as unknown;
+          } catch {
+            data = null;
+          }
+        }
+        return response.ok
+          ? { data, error: null }
+          : {
+              data: null,
+              error: {
+                message:
+                  typeof data === "object" && data && "message" in data
+                    ? String(data.message).slice(0, 500)
+                    : `Database HTTP ${response.status}`,
+              },
+            };
+      })();
+      const forcedTimeout = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Database RPC timed out: ${name}`)),
+          15_000,
+        ),
+      );
+      try {
+        return await Promise.race([request, forcedTimeout]);
+      } finally {
+        clearTimeout(timeout);
+        deadline.removeEventListener("abort", abortForDeadline);
+      }
     },
   };
 }
@@ -194,7 +212,9 @@ export function createWorkerHandler({ env, database, provider }: Dependencies) {
         return reply({ error: "Invalid configured provider URL" }, 503);
       }
     }
-    const deadline = AbortSignal.timeout(80000);
+    // Keep the complete invocation safely below the two-minute DB lease. Each
+    // RPC also has its own hard timeout, including response-body consumption.
+    const deadline = AbortSignal.timeout(70000);
     let db: Database;
     try {
       db = database ? database() : databaseClient(env, deadline);

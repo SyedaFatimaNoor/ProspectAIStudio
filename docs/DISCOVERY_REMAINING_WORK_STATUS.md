@@ -30,11 +30,13 @@ completed from this coding workspace.
    - The generated bundle contains no credentials.
 
 3. **RPC timeouts and failure-path independence**
+   - `supabase/migrations/202611100001_worker_rpc_timeouts.sql` from `main` sets
+     bounded statement timeouts for snapshot search, commit, and fail RPCs.
    - New migration `supabase/migrations/202611100001_discovery_stage_telemetry.sql`
-     sets bounded per-function `statement_timeout` and `lock_timeout` values for
-     heartbeat, claim, snapshot status, snapshot search, commit, and fail RPCs.
+     adds lock timeouts and per-function timeout settings for heartbeat, claim,
+     snapshot status, snapshot search, commit, and fail RPCs.
    - The worker's failure RPC now uses an independent 10-second database deadline
-     so an expired 80-second discovery deadline cannot prevent lease cleanup.
+     so an expired discovery deadline cannot prevent lease cleanup.
 
 4. **Search/commit path safety**
    - Confirmed `discoverOsmSnapshot()` truncates transformed rows at
