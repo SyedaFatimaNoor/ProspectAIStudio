@@ -161,6 +161,9 @@ function workerJobSummary(
       ? `${summary.response_time_ms} ms provider response`
       : null,
     summary.error_category ? summary.error_category.replaceAll("_", " ") : null,
+    summary.worker_stage
+      ? `stage ${summary.worker_stage.replaceAll("_", " ")}`
+      : null,
   ].filter(Boolean);
   return facts.length
     ? facts.join(" · ")
@@ -710,6 +713,17 @@ export default function Settings() {
                             )}
                           </dd>
                         </div>
+                        {data.config.worker.last_failed_stage && (
+                          <div>
+                            <dt>Last failed stage</dt>
+                            <dd>
+                              {data.config.worker.last_failed_stage.replaceAll(
+                                "_",
+                                " ",
+                              )}
+                            </dd>
+                          </div>
+                        )}
                         <div>
                           <dt>Last provider error</dt>
                           <dd>

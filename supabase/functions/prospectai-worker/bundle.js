@@ -655,6 +655,25 @@ function snapshotReadiness(value) {
 
 // src/lib/worker-lifecycle.ts
 var cloudWorkerVersion = "7.0.3";
+var workerStages = /* @__PURE__ */ new Set([
+  "authentication",
+  "configuration",
+  "database",
+  "heartbeat",
+  "snapshot_status",
+  "source_pause",
+  "claim",
+  "job_validation",
+  "snapshot_search",
+  "overpass_search",
+  "transform",
+  "commit",
+  "failure_logging",
+  "completed"
+]);
+function safeWorkerStage(value) {
+  return typeof value === "string" && workerStages.has(value) ? value : "database";
+}
 function httpStatus(value) {
   return typeof value === "number" && Number.isInteger(value) ? value : null;
 }
@@ -838,12 +857,24 @@ function claim(value) {
 }
 function createWorkerHandler({ env, database, provider }) {
   return async (request) => {
+    let stage = "authentication";
+    const setStage = (next) => {
+      stage = safeWorkerStage(next);
+      console.info(
+        JSON.stringify({
+          event: "cloud_worker_stage",
+          stage,
+          worker_version: cloudWorkerVersion
+        })
+      );
+    };
     const reply = (value, status = 200) => Response.json(value, {
       status,
       headers: { "Cache-Control": "no-store" }
     });
     if (request.method !== "POST")
       return reply({ error: "POST required" }, 405);
+    setStage("configuration");
     const expected = env.get("PA_WORKER_TOKEN") || "";
     if (expected.length < 32)
       return reply({ error: "Worker authentication is not configured" }, 503);
@@ -868,10 +899,13 @@ function createWorkerHandler({ env, database, provider }) {
     try {
       db = database ? database() : databaseClient(env, deadline);
     } catch {
+      setStage("database");
       return reply({ error: "Worker database configuration is missing" }, 503);
     }
+    setStage("database");
     const source = workerSource(snapshot, url?.toString());
     try {
+      setStage("heartbeat");
       const heartbeat = await db.rpc("pa_cloud_heartbeat", {
         p_source: source,
         p_worker_version: cloudWorkerVersion
@@ -883,6 +917,7 @@ function createWorkerHandler({ env, database, provider }) {
     }
     if (snapshot) {
       try {
+        setStage("snapshot_status");
         const { data, error } = await db.rpc("pa_osm_snapshot_status");
         if (error)
           return reply(
@@ -894,6 +929,7 @@ function createWorkerHandler({ env, database, provider }) {
         const readiness = snapshotReadiness(data);
         if (!readiness.ready) {
           const reason = readiness.message || "The OpenStreetMap snapshot is not ready for discovery. No job was claimed.";
+          setStage("source_pause");
           const paused = await db.rpc("pa_cloud_pause_source", {
             p_error: reason
           });
@@ -923,6 +959,7 @@ function createWorkerHandler({ env, database, provider }) {
     let claimed = null;
     let sourceRequestStarted = null;
     try {
+      setStage("claim");
       const { data, error } = await db.rpc("pa_cloud_claim", {
         p_source: source,
         p_worker_version: cloudWorkerVersion
@@ -931,17 +968,21 @@ function createWorkerHandler({ env, database, provider }) {
       if (!data) return reply({ idle: true });
       claimed = claim(data);
       const job = claimed.job;
+      setStage("job_validation");
       if (job.provider !== "openstreetmap")
         throw new Error("Unsupported discovery provider");
       const input = parseCloudSearch(job);
+      setStage(snapshot ? "snapshot_search" : "overpass_search");
       sourceRequestStarted = performance.now();
       const rows = provider ? await provider.discover(input, deadline) : snapshot ? await discoverOsmSnapshot(
         input,
         (name, args) => db.rpc(name, args),
         deadline
       ) : await discoverOpenStreetMap(input, url.toString(), deadline);
+      setStage("transform");
       const responseTime = boundedResponseTime(sourceRequestStarted);
       if (deadline.aborted) throw new Error("Worker deadline exceeded");
+      setStage("commit");
       const committed = await db.rpc("pa_cloud_commit", {
         p_job: job.id,
         p_token: claimed.token,
@@ -949,11 +990,13 @@ function createWorkerHandler({ env, database, provider }) {
         p_response_time_ms: responseTime
       });
       if (committed.error) throw new Error(committed.error.message);
+      setStage("completed");
       console.info(
         JSON.stringify({
           event: "cloud_discovery",
           job: job.id,
-          result: committed.data
+          result: committed.data,
+          stage
         })
       );
       return reply({ result: committed.data, mode: "listing-only" });
@@ -963,21 +1006,26 @@ function createWorkerHandler({ env, database, provider }) {
       const message = safeWorkerFailureDetail(effectiveError, failure);
       const responseTime = sourceRequestStarted === null ? null : boundedResponseTime(sourceRequestStarted);
       if (claimed) {
+        const failedStage = stage;
+        setStage("failure_logging");
         try {
-          const failed = await db.rpc("pa_cloud_fail", {
+          const failureDb = database ? db : databaseClient(env, AbortSignal.timeout(1e4));
+          const failed = await failureDb.rpc("pa_cloud_fail", {
             p_job: claimed.job.id,
             p_token: claimed.token,
             p_error: message,
             p_error_category: failure.category,
             p_response_time_ms: responseTime,
-            p_worker_version: cloudWorkerVersion
+            p_worker_version: cloudWorkerVersion,
+            p_stage: failedStage
           });
           if (failed.error) throw new Error("Failure logging unavailable");
         } catch {
           console.error(
             JSON.stringify({
               event: "cloud_failure_recording_failed",
-              error_category: "database_error"
+              error_category: "database_error",
+              stage
             })
           );
         }
@@ -986,7 +1034,8 @@ function createWorkerHandler({ env, database, provider }) {
         JSON.stringify({
           event: "cloud_worker_failed",
           error_category: failure.category,
-          http_status: failure.httpStatus
+          http_status: failure.httpStatus,
+          stage
         })
       );
       return reply(

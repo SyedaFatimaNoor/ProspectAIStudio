@@ -135,6 +135,7 @@ export type WorkerJobSummary = {
   duplicate_count?: number | null;
   response_time_ms?: number | null;
   error_category?: string | null;
+  worker_stage?: string | null;
   status?: string | null;
 };
 
@@ -160,6 +161,7 @@ export type WorkerHealth = {
   interval_minutes: number;
   provider_source?: string | null;
   worker_version?: string | null;
+  last_failed_stage?: string | null;
   last_heartbeat_at?: string | null;
   last_started_at: string | null;
   last_finished_at: string | null;

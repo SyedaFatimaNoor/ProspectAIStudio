@@ -3,6 +3,46 @@
 // workers.
 export const cloudWorkerVersion = "7.0.3";
 
+/** Bounded stage names only; never include URLs, tokens, user IDs or payloads. */
+export type WorkerStage =
+  | "authentication"
+  | "configuration"
+  | "database"
+  | "heartbeat"
+  | "snapshot_status"
+  | "source_pause"
+  | "claim"
+  | "job_validation"
+  | "snapshot_search"
+  | "overpass_search"
+  | "transform"
+  | "commit"
+  | "failure_logging"
+  | "completed";
+
+const workerStages = new Set<WorkerStage>([
+  "authentication",
+  "configuration",
+  "database",
+  "heartbeat",
+  "snapshot_status",
+  "source_pause",
+  "claim",
+  "job_validation",
+  "snapshot_search",
+  "overpass_search",
+  "transform",
+  "commit",
+  "failure_logging",
+  "completed",
+]);
+
+export function safeWorkerStage(value: unknown): WorkerStage {
+  return typeof value === "string" && workerStages.has(value as WorkerStage)
+    ? (value as WorkerStage)
+    : "database";
+}
+
 export type WorkerFailureCategory =
   | "provider_blocked"
   | "rate_limited"
